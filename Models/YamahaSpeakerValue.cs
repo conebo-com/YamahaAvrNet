@@ -4,7 +4,7 @@ namespace YamahaAvrNet.Models
 {
     /// <summary>
     /// Physical value (for instance dB or m) together with the native Val/Exp/Unit.
-    /// Phase 3 will use the protocol-reported exponent and unit for every value.
+    /// Legacy XML operations will use the protocol-reported exponent and unit for every value.
     /// </summary>
     public sealed class YamahaSpeakerValue
     {

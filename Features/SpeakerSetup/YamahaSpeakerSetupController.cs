@@ -7,7 +7,7 @@ using YamahaAvrNet.Models;
 namespace YamahaAvrNet.Features.SpeakerSetup
 {
     /// <summary>
-    /// Phase-one contract only. No protocol is selected and NO hardware command is sent.
+    /// Contract placeholder. No speaker protocol is selected and no hardware command is sent.
     /// Writes must later be gated by per-model/per-feature verified capabilities.
     /// </summary>
     internal sealed class YamahaSpeakerSetupController : IYamahaSpeakerSetup
@@ -84,7 +84,7 @@ namespace YamahaAvrNet.Features.SpeakerSetup
         private static NotSupportedException Unavailable()
         {
             return new NotSupportedException(
-                "Speaker communication is not implemented in phase 1. No command was sent.");
+                "Speaker communication is not implemented yet. No command was sent.");
         }
     }
 }

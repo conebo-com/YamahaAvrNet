@@ -37,7 +37,8 @@ namespace YamahaAvrNet.PublicApi
                 throw new ArgumentOutOfRangeException(nameof(HttpPort));
             if (!EnableYnca && !EnableExtendedControl && !EnableLegacyXml)
                 throw new ArgumentException("At least one protocol must be enabled.");
-            if (RequestTimeout <= TimeSpan.Zero)
+            if (RequestTimeout <= TimeSpan.Zero ||
+                RequestTimeout.TotalMilliseconds > int.MaxValue)
                 throw new ArgumentOutOfRangeException(nameof(RequestTimeout));
 
             return new YamahaAvrOptions

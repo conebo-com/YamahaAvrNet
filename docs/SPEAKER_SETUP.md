@@ -1,6 +1,6 @@
 # Speaker setup and native Yamaha channel IDs
 
-This reference describes observed **RX-A3060** speaker settings and the intended data semantics of YamahaAvrNet. It does not imply that speaker communication is implemented in the current Phase 1 code or supported across every Yamaha model.
+This reference describes observed **RX-A3060** speaker settings and the intended data semantics of YamahaAvrNet. It does not imply that speaker communication is implemented in the current implementation or supported across every Yamaha model.
 
 ## Native channels
 

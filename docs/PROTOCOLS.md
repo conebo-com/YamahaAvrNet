@@ -2,7 +2,7 @@
 
 This document records publicly useful protocol behavior and historical receiver observations, **not an implementation-completeness claim**. The reference device is a **Yamaha RX-A3060** running firmware **2.86** with Extended Control API **2.08**. Availability and limits can differ by model, firmware, and current receiver state.
 
-YamahaAvrNet is designed to use three protocol families together when available. None has been implemented as a working network provider in the current Phase 1 repository.
+YamahaAvrNet is designed to use three protocol families together when available. **The implementation currently supports the three read-only Extended Control GET endpoints.** YNCA and legacy XML are documented references but are not implemented as transports yet.
 
 ## 1. YNCA (TCP / optionally serial)
 
@@ -32,7 +32,21 @@ For the main zone, the reported dB volume range was **−80.5 to +16.5 dB** with
 
 The `setSpeakerPattern?num=1|2` function is documented and advertised by the reference receiver, but a live pattern switch was **not verified**. Do not enable it merely because the endpoint name exists.
 
-A future provider must handle the HTTP response, JSON `response_code`, missing/extra fields, cancellation, and actual device capability evidence separately.
+### Implemented Extended Control behavior
+
+- Uses an explicitly configured receiver host and HTTP port (`80` by default); there is no network scan.
+- Sends only the three fixed GET endpoints above. No Extended Control write method is exposed.
+- Reuses one `HttpClient` per receiver object and serializes requests, including direct `ExtendedControl` calls.
+- Distinguishes HTTP status failures from Yamaha JSON `response_code` errors (`0` means success).
+- Parses JSON using `Newtonsoft.Json`; unknown or missing optional fields remain unknown without rejecting an otherwise valid response.
+- Requires valid response envelopes, limits response size to 2 MiB, uses a strict UTF-8 decoder and bounded JSON nesting, and supports cancellation and configurable timeout.
+- Returns typed immutable snapshots: `YamahaExtendedDeviceInfo`, `YamahaExtendedFeatures`, and `YamahaExtendedFunctionStatus`.
+- Reads `system.input_list` object entries and each zone's native `input_list`, `sound_program_list`, `func_list`, `scene_num`, and `range_step` independently. Additional `*_list` option arrays remain available per zone.
+- Retains `volume` and `actual_volume_db` as separate native ranges; no inferred conversion is made.
+- Preserves miscellaneous `getFuncStatus` keys as JSON literal strings without guessing their meaning.
+- Populates the receiver's feature/capability snapshot with device-reported or read-verified evidence. Successful reads never imply write permission.
+
+The library has **not** been live-validated on a physical RX-A3060 with the current implementation. Feature availability for each device is determined by its own GET responses. Neither `setSpeakerPattern` nor any other PUT is sent automatically.
 
 ## 3. Legacy Yamaha HTTP/XML
 

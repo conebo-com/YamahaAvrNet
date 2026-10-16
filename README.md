@@ -6,7 +6,7 @@ YamahaAvrNet is an independent C# library for controlling Yamaha AV receivers. I
 **Language baseline:** C# 7.3  
 **License:** MIT (see [LICENSE](LICENSE))
 
-> **Current implementation status:** The repository contains the Phase 1 API contracts, receiver and speaker models, exception types, sample application, and WPF application skeleton. **Receiver communication is not implemented yet.** Connection, initialization, refresh, and speaker operations that require a protocol provider throw `NotSupportedException`; they do not contact an AVR. The documented RX-A3060 hardware observations are not claims that these features already work in this C# library.
+> **Current implementation status:** Read-only Yamaha Extended Control HTTP/JSON communication is implemented for `getDeviceInfo`, `getFeatures`, and `getFuncStatus`. `ConnectAsync`, `InitializeAsync`, and `RefreshAsync` use this provider when Extended Control is enabled. The standalone WPF application can discover and inspect a receiver manually. **YNCA, legacy Yamaha XML, zone control, and speaker setup commands are not implemented yet.** Receiver compatibility still depends on the real device; historical RX-A3060 observations are not an assertion of current hardware testing with this version of the library.
 
 ## Solution and projects
 
@@ -16,8 +16,8 @@ Open **`YamahaAvrNet.slnx`**. The repository does not use a `.sln` file.
 | --- | --- | --- |
 | `AvrNet.Abstractions/` | Manufacturer-neutral interfaces and shared models | `net48` |
 | `YamahaAvrNet.csproj` + core source folders in the repository root | Standalone Yamaha library and Yamaha-specific API contracts | `net48` |
-| `YamahaAvrNet.Sample/` | Console application demonstrating the current API skeleton | `net48` |
-| `YamahaAvrNet.TesterGui/` | Standalone WPF control and diagnostic application (currently a UI skeleton) | .NET Framework 4.8 |
+| `YamahaAvrNet.Sample/` | Optional read-only console discovery example | `net48` |
+| `YamahaAvrNet.TesterGui/` | Standalone WPF application with manual read-only device discovery | .NET Framework 4.8 |
 
 All Yamaha library source files are located directly under the repository root (for example, `PublicApi/`, `Features/` and `Models/`). The root `YamahaAvrNet.csproj` explicitly includes only these source folders, preventing the sibling applications and shared abstractions from being compiled into the Yamaha assembly. There are no `src/`, `samples/` or `tools/` wrapper directories.
 
@@ -35,15 +35,46 @@ From a Developer PowerShell for Visual Studio in the repository root:
 msbuild .\YamahaAvrNet.slnx /restore /p:Configuration=Debug
 ```
 
-To launch the UI, open `YamahaAvrNet.slnx` in Visual Studio and select **`YamahaAvrNet.TesterGui`** as the startup project. Select `YamahaAvrNet.Sample` to run the console application instead.
+To launch the GUI, open `YamahaAvrNet.slnx` in Visual Studio and select **`YamahaAvrNet.TesterGui`** as the startup project. Enter the receiver's IP address/hostname and HTTP port (normally `80`), then choose **Connect and discover**. No requests are sent on application startup.
+
+The console example performs the same discovery only when a host argument is supplied:
+
+```powershell
+.\YamahaAvrNet.Sample\bin\Debug\net48\YamahaAvrNet.Sample.exe 192.168.1.50 80
+```
+
+The three GETs return device identity (model/firmware/API), system and per-zone functions, native zone/input/sound IDs, scene counts, native numeric ranges, speaker-pattern count and active pattern when the receiver reports them. **Actual device behavior is not automatically verified by merely compiling the library.**
 
 The WPF application is a **manual** control and diagnostic interface, not an automated test suite. The core library contains no WPF dependency. The `net48` target does not imply supported Linux or Raspberry Pi execution.
 
+## Read-only Extended Control example
+
+```csharp
+using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
+{
+    Host = "192.168.1.50",
+    EnableYnca = false,
+    EnableLegacyXml = false,
+    EnableExtendedControl = true
+}))
+{
+    await receiver.InitializeAsync();
+    var device = receiver.DeviceInfo;        // model, firmware and API version
+    var features = receiver.DeviceFeatures;  // native zones, ranges and counts
+    var status = receiver.FunctionStatus;    // active speaker pattern if reported
+    await receiver.RefreshAsync();           // refreshes system function status
+}
+```
+
+The methods are cancellable. They check HTTP status and Yamaha's JSON `response_code` separately, reject oversized/invalid JSON, and do not send write requests. An isolated `receiver.ExtendedControl.GetFeaturesAsync()` call returns freshly parsed data but does not update the facade's cached state; `InitializeAsync` and `RefreshAsync` do.
+
+The library uses `Newtonsoft.Json` 13.0.4, which provides a .NET Framework-compatible runtime implementation. The host address is never logged by the library.
+
 ## API and design principles
 
-- `YamahaAvrClient` is the application-facing entry point, with lifecycle operations and access to feature-specific controllers. It is **not yet a working network client**.
-- `YamahaAvrOptions` defines host, HTTP and YNCA ports, enabled protocols, and a request timeout. Constructing the client does not open a connection.
-- Device features, zones, inputs, speaker patterns, and native channel IDs must be discovered from actual receiver responses wherever possible; no universal fixed mapping is assumed.
+- `YamahaAvrClient` is the application-facing entry point. Its lifecycle methods currently use read-only Extended Control when enabled, with protocol parsing delegated to a dedicated provider.
+- `YamahaAvrOptions` defines host, HTTP and YNCA ports, enabled protocols, and a request timeout. Constructing the client does not open a connection. The only implemented provider is currently Extended Control, so disable it only if you do not intend to connect yet.
+- System features, zones, inputs, sound programs, scene counts, speaker-pattern counts, and numeric ranges are read from actual Extended Control responses. Native speaker channel IDs will be discovered in the legacy-XML phase; no universal fixed mapping is assumed.
 - Capability status and evidence are tracked separately. An unknown capability is **not** treated as unsupported, and successful reads do not imply write permission.
 - Volume in the shared abstraction is expressed in **dB**. Speaker levels and distances use `decimal` for measured values, with native unit and exponent retained.
 - Addressable speaker channels, configured speakers, and channels currently carrying a signal are distinct concepts.

@@ -2,7 +2,7 @@
 
 This document distinguishes **observed receiver behavior** from **features currently implemented by YamahaAvrNet**. Historical observations were made on a **Yamaha RX-A3060, firmware 2.86, Extended Control API 2.08**. They must not be generalized to other models or firmware versions.
 
-The C# library is currently at its **Phase 1 API-only stage**: none of the receiver operations listed below has a working protocol provider in this repository yet.
+**Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker GET/PUT and YNCA are **not implemented**. This build has not yet been verified against a physical receiver; historical hardware evidence below is separate from the implementation status.
 
 ## Capability terminology
 
@@ -36,5 +36,16 @@ A rejected request is not proof that an entire feature is unsupported. For examp
 - Scene counts were reported as 12 for the main zone and 4 each for zones 2–4. Scenes and tuner/NETUSB presets are **not** speaker patterns.
 - Main-zone `actual_volume_db` information reported an approximate range of **−80.5 to +16.5 dB** in **0.5 dB** steps. Its numeric `volume` scale is different and must not be mixed with dB.
 - The receiver's `desc.xml` did not enumerate every working `Speaker_Preout` path, so an omitted description entry does not by itself prove lack of support.
+
+### Implemented features vs. hardware evidence
+
+| Area | Implemented in the C# library | Physical receiver validated with this build |
+| --- | --- | --- |
+| Extended Control device information (GET) | Yes | Not yet |
+| Extended Control feature lists, zones, scene counts and ranges (GET) | Yes | Not yet |
+| Extended Control function status (GET) | Yes | Not yet |
+| Extended Control writes / speaker-pattern switch | No | No |
+| Legacy XML speaker levels and distances | No | No (historical RX-A3060 evidence above) |
+| YNCA state monitoring and commands | No | No |
 
 See [Protocol reference](PROTOCOLS.md) and [Speaker setup](SPEAKER_SETUP.md) for request formats and channel semantics.
