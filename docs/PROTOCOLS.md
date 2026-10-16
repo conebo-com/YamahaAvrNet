@@ -2,7 +2,7 @@
 
 This document records publicly useful protocol behavior and historical receiver observations, **not an implementation-completeness claim**. The reference device is a **Yamaha RX-A3060** running firmware **2.86** with Extended Control API **2.08**. Availability and limits can differ by model, firmware, and current receiver state.
 
-YamahaAvrNet is designed to use three protocol families together when available. The implementation includes three Extended Control GET endpoints, legacy XML speaker GETs and limited opt-in verified-scope PUTs, plus a read-only YNCA TCP session. YNCA writes and higher-level YNCA feature controllers are not yet implemented.
+YamahaAvrNet is designed to use three protocol families together when available. The implementation includes three Extended Control GET endpoints, legacy XML speaker GETs and limited opt-in verified-scope PUTs, plus a shared YNCA TCP session with typed zone status and optional guarded zone writes. Unverified functions remain disabled.
 
 ## 1. YNCA (TCP / optionally serial)
 
@@ -14,15 +14,18 @@ YamahaAvrNet is designed to use three protocol families together when available.
 - A receiver may impose a one-client limit. Command consumers and monitoring therefore share **one centrally managed YNCA session**, with serialized GETs, timeouts, and reconnect-on-demand after a dropped or reset connection.
 - Preserve unrecognized native subunit/function values rather than silently discarding them.
 
-### Implemented YNCA TCP foundation (Phase 4.1)
+### Implemented YNCA TCP foundation (Phase 4.1 and Phase 4.2)
 
 - The public `receiver.Ynca` facade is available only when `EnableYnca` is enabled. `ConnectAsync()` explicitly opens the TCP session; `GetAsync(subunit, function)` also reconnects if the session was closed.
-- GET commands are limited to validated ASCII subunit/function identifiers and use `@SUBUNIT:FUNCTION=?\r\n`; **no write API or raw PUT passthrough is exposed**.
+- GET commands use validated ASCII identifiers and `@SUBUNIT:FUNCTION=?\r\n`. The raw public YNCA interface remains GET-only; a separate typed zone controller can send validated writes after explicit opt-in.
 - A single background reader handles fragmented/combined TCP messages, strips CRLF, enforces a 4096-byte maximum line length, preserves unknown native messages and publishes `MessageReceived` events.
 - Incoming values are cached by native `SUBUNIT:FUNCTION` key. Each `GetAsync` is serialized; a pending request accepts a matching observed value or `@RESTRICTED`/`@UNDEFINED`. Unsolicited updates are not falsely labeled as uniquely correlated GET replies.
 - Cancellation, connect timeouts, request timeouts and connection loss are handled explicitly. After a request fault, the session is closed rather than reused with potentially delayed responses. A later explicit GET opens a new connection; there is no unrequested background reconnection or keepalive in this phase.
-- Windows WPF and interactive console sample provide manual read-only access. Neither triggers YNCA connection when the application starts.
-- YNCA over serial, write commands, full per-model command discovery, keepalive and background reconnect remain planned work. Physical receiver verification of this C# implementation is still pending.
+- The RX-A3060 running firmware 2.86 has now been **live-confirmed** reading `SYS:MODELNAME` and `MAIN:PWR`, `MAIN:VOL`, `MAIN:MUTE`, `MAIN:INP`, including a repeated `MAIN:VOL` GET. The sample observed main volume `-36.5 dB` on this run.
+- The typed `ZoneControl` consumes the same TCP session: `RefreshAsync` reads `PWR`, `VOL`, `MUTE`, and `INP` for reported zones, while `GetStates` and `ZoneStateChanged` expose immutable zone-state snapshots. Absent values are not invented; cached values become `IsStale` on disconnect.
+- Optional `EnableYncaZoneWrites` permits only typed, explicit power, mute, dB volume and reported-input changes. Volume requires a device-reported dB range/step; inputs require a native ID and conservative YNCA mapping. Each PUT is followed by a GET and comparison, with no PUT retry. The actual device effect remains unverified until a controlled hardware check.
+- Windows WPF provides manual zone reads and individually confirmed writes. The console sample remains read-only.
+- YNCA over serial, full per-model command discovery, keepalive and continuous background reconnect remain future work; reconnect occurs on the next explicit operation.
 
 The Python [`ynca` project](https://github.com/mvdwetering/ynca) is a protocol research reference only, not a source-code port.
 

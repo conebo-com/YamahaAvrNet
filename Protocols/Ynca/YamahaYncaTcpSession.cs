@@ -12,7 +12,7 @@ namespace YamahaAvrNet.Protocols.Ynca
     /// <summary>
     /// Single TCP session with one reader and serialized GETs. The protocol has no request IDs;
     /// matching a received value proves observation, not exclusive request/response causality.
-    /// No write commands or write probes are supported by this session.
+    /// Writes are opt-in at the controller level, serialized and followed by a GET.
     /// </summary>
     internal sealed class YamahaYncaTcpSession : IDisposable
     {
@@ -177,6 +177,96 @@ namespace YamahaAvrNet.Protocols.Ynca
             finally { _commandGate.Release(); }
         }
 
+        /// <summary>
+        /// Sends one PUT and observes a subsequent GET without releasing the command gate.
+        /// PUT is never retried. If the connection fails after the send, the physical
+        /// receiver state is uncertain and must be checked before any further change.
+        /// </summary>
+        internal async Task<YamahaYncaMessage> PutAndReadBackAsync(string subunit,
+            string function, string value, CancellationToken ct)
+        {
+            byte[] put = YamahaYncaCodec.Put(subunit, function, value);
+            ThrowIfDisposed();
+            await _commandGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await ConnectAsync(ct).ConfigureAwait(false);
+                TcpClient tcp;
+                CancellationTokenSource session;
+                lock (_sync)
+                {
+                    tcp = _tcp;
+                    session = _sessionCts;
+                    if (tcp == null || session == null || session.IsCancellationRequested)
+                        throw new YamahaConnectionException("YNCA connection closed before PUT.");
+                }
+                try
+                {
+                    using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, session.Token))
+                    {
+                        Task writer = tcp.GetStream().WriteAsync(put, 0, put.Length, deadline.Token);
+                        Task timer = Task.Delay(_timeout, deadline.Token);
+                        if (await Task.WhenAny(writer, timer).ConfigureAwait(false) != writer)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            if (session.IsCancellationRequested)
+                                throw new YamahaConnectionException("YNCA connection closed during PUT.");
+                            throw new YamahaTimeoutException("YNCA PUT send timed out; receiver state is uncertain.");
+                        }
+                        await writer.ConfigureAwait(false);
+                        // Do not treat a PUT as acknowledged: perform a separate GET.
+                        // A queued unsolicited notification may still match that GET.
+                        var pending = new PendingRead { Subunit = subunit, Function = function };
+                        lock (_sync)
+                        {
+                            if (!ReferenceEquals(tcp, _tcp) || session.IsCancellationRequested)
+                                throw new YamahaConnectionException("YNCA connection closed after PUT.");
+                            _pending = pending;
+                        }
+                        try
+                        {
+                            byte[] get = YamahaYncaCodec.Get(subunit, function);
+                            Task readWriter = tcp.GetStream().WriteAsync(get, 0, get.Length, deadline.Token);
+                            timer = Task.Delay(_timeout, deadline.Token);
+                            if (await Task.WhenAny(readWriter, timer).ConfigureAwait(false) != readWriter)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                if (session.IsCancellationRequested)
+                                    throw new YamahaConnectionException("YNCA connection closed during readback GET.");
+                                throw new YamahaTimeoutException("YNCA readback GET send timed out.");
+                            }
+                            await readWriter.ConfigureAwait(false);
+                            timer = Task.Delay(_timeout, deadline.Token);
+                            if (await Task.WhenAny(pending.Completion.Task, timer).ConfigureAwait(false) != pending.Completion.Task)
+                            {
+                                ct.ThrowIfCancellationRequested();
+                                if (session.IsCancellationRequested)
+                                    throw new YamahaConnectionException("YNCA connection closed during readback.");
+                                throw new YamahaTimeoutException("YNCA readback timed out; receiver state is uncertain.");
+                            }
+                            YamahaYncaMessage response = await pending.Completion.Task.ConfigureAwait(false);
+                            if (response.Kind == YamahaYncaMessageKind.Restricted)
+                                throw new YamahaFeatureTemporarilyUnavailableException("YNCA readback was restricted.");
+                            if (response.Kind == YamahaYncaMessageKind.Undefined)
+                                throw new YamahaFeatureNotSupportedException("YNCA readback was undefined.");
+                            return response;
+                        }
+                        finally
+                        {
+                            lock (_sync)
+                                if (ReferenceEquals(_pending, pending)) _pending = null;
+                        }
+                    }
+                }
+                catch
+                {
+                    CloseSession("YNCA write/readback failed; no automatic retry.", tcp, session);
+                    throw;
+                }
+            }
+            finally { _commandGate.Release(); }
+        }
+
         private async Task ReadLoopAsync(TcpClient tcp, CancellationTokenSource session)
         {
             var buffer = new byte[2048];
@@ -227,18 +317,22 @@ namespace YamahaAvrNet.Protocols.Ynca
                     _last[message.Subunit + ":" + message.Function] = message;
                 pending = _pending;
                 if (pending != null &&
-                    ((message.Kind == YamahaYncaMessageKind.Value &&
-                      string.Equals(message.Subunit, pending.Subunit, StringComparison.OrdinalIgnoreCase) &&
-                      string.Equals(message.Function, pending.Function, StringComparison.OrdinalIgnoreCase)) ||
-                     message.Kind == YamahaYncaMessageKind.Restricted ||
-                     message.Kind == YamahaYncaMessageKind.Undefined))
-                    pending.Completion.TrySetResult(message);
+                    !((message.Kind == YamahaYncaMessageKind.Value &&
+                       string.Equals(message.Subunit, pending.Subunit, StringComparison.OrdinalIgnoreCase) &&
+                       string.Equals(message.Function, pending.Function, StringComparison.OrdinalIgnoreCase)) ||
+                      message.Kind == YamahaYncaMessageKind.Restricted ||
+                      message.Kind == YamahaYncaMessageKind.Undefined))
+                    pending = null;
             }
+            // Publish the new status to zone observers before completing a GET.
+            // Otherwise RefreshAsync might return the previous cache snapshot.
             var handler = MessageReceived;
             if (handler != null)
                 foreach (EventHandler<YamahaYncaMessageEventArgs> subscriber in handler.GetInvocationList())
                     try { subscriber(this, new YamahaYncaMessageEventArgs(message)); }
                     catch { /* Subscribers must never terminate the TCP reader. */ }
+            if (pending != null)
+                pending.Completion.TrySetResult(message);
         }
 
         private void CloseSessionIfCurrent(TcpClient tcp, CancellationTokenSource session, string reason)

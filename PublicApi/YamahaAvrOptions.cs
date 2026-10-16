@@ -29,6 +29,12 @@ namespace YamahaAvrNet.PublicApi
         /// </summary>
         public bool EnableVerifiedSpeakerWrites { get; set; }
 
+        /// <summary>
+        /// Explicit opt-in for manual YNCA zone power/volume/mute/input writes.
+        /// This does not authorize any writes during discovery or refresh.
+        /// </summary>
+        public bool EnableYncaZoneWrites { get; set; }
+
         internal YamahaAvrOptions CopyValidated()
         {
             if (string.IsNullOrWhiteSpace(Host))
@@ -56,7 +62,8 @@ namespace YamahaAvrNet.PublicApi
                 EnableExtendedControl = EnableExtendedControl,
                 EnableLegacyXml = EnableLegacyXml,
                 RequestTimeout = RequestTimeout,
-                EnableVerifiedSpeakerWrites = EnableVerifiedSpeakerWrites
+                EnableVerifiedSpeakerWrites = EnableVerifiedSpeakerWrites,
+                EnableYncaZoneWrites = EnableYncaZoneWrites
             };
         }
     }

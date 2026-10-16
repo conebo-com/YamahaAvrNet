@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using YamahaAvrNet.Discovery;
 using YamahaAvrNet.Features.SpeakerSetup;
+using YamahaAvrNet.Features.Zones;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.Protocols.ExtendedControl;
 using YamahaAvrNet.Protocols.LegacyXml;
@@ -24,6 +25,7 @@ namespace YamahaAvrNet.PublicApi
         private readonly YamahaExtendedHttpClient _extendedHttp;
         private readonly YamahaLegacyXmlHttpClient _legacyXml;
         private readonly YamahaYncaTcpSession _yncaSession;
+        private readonly YamahaZoneController _zoneController;
         private readonly SemaphoreSlim _lifecycleGate = new SemaphoreSlim(1, 1);
         private readonly object _stateSync = new object();
         private YamahaDeviceCapabilities _capabilities;
@@ -51,6 +53,9 @@ namespace YamahaAvrNet.PublicApi
             _yncaSession = _options.EnableYnca
                 ? new YamahaYncaTcpSession(_options.Host, _options.YncaPort, _options.RequestTimeout) : null;
             Ynca = _yncaSession == null ? null : new YamahaYncaController(_yncaSession);
+            _zoneController = _yncaSession == null ? null : new YamahaZoneController(
+                _yncaSession, () => DeviceFeatures, () => _disposed, _options.EnableYncaZoneWrites);
+            ZoneControl = _zoneController;
             Speakers = new YamahaSpeakerSetupController(EnsureNotDisposed, _legacyXml,
                 GetReportedSpeakerPatternCount, GetExtendedActivePatternAsync,
                 RecordSpeakerRead, () => Model,
@@ -92,6 +97,8 @@ namespace YamahaAvrNet.PublicApi
 
         /// <summary>Optional shared YNCA TCP session. Connecting it never writes AVR settings.</summary>
         public IYamahaYnca Ynca { get; private set; }
+        /// <summary>Typed zone controls using the same shared YNCA session.</summary>
+        public IYamahaZones ZoneControl { get; private set; }
 
         public YamahaExtendedDeviceInfo DeviceInfo
         {
@@ -119,7 +126,8 @@ namespace YamahaAvrNet.PublicApi
             EnsureNotDisposed();
             lock (_stateSync)
                 return new YamahaReceiverState(_connectionState, _lastUpdatedUtc,
-                    _stale, _deviceInfo == null ? null : _deviceInfo.ModelName);
+                    _stale, _deviceInfo == null ? null : _deviceInfo.ModelName,
+                    _zoneController == null ? null : _zoneController.GetStates());
         }
 
         /// <summary>
@@ -361,6 +369,8 @@ namespace YamahaAvrNet.PublicApi
                 _extendedHttp.Dispose();
             if (_legacyXml != null)
                 _legacyXml.Dispose();
+            if (_zoneController != null)
+                _zoneController.Dispose();
             if (_yncaSession != null)
                 _yncaSession.Dispose();
             lock (_stateSync) _connectionState = YamahaConnectionState.Disposed;

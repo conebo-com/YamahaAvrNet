@@ -41,7 +41,13 @@ namespace YamahaAvrNet.TesterGui
                 new TesterCommand("Speaker Setup", "Set Front_L distance (verified)", "set-distance", true, true),
                 new TesterCommand("YNCA / TCP", "Read main-zone status (PWR/VOL/MUTE/INP)", "ynca-main"),
                 new TesterCommand("YNCA / TCP", "Read receiver model (SYS/MODELNAME)", "ynca-model"),
-                new TesterCommand("YNCA / TCP", "Read custom YNCA function", "ynca-custom")
+                new TesterCommand("YNCA / TCP", "Read custom YNCA function", "ynca-custom"),
+                new TesterCommand("YNCA / Zones", "Refresh zone status", "zone-status"),
+                new TesterCommand("YNCA / Zones", "Show observed zone state cache", "zone-cache"),
+                new TesterCommand("YNCA / Zones", "Set zone power (On/Standby)", "zone-set-power", false, true),
+                new TesterCommand("YNCA / Zones", "Set zone mute (On/Off)", "zone-set-mute", false, true),
+                new TesterCommand("YNCA / Zones", "Set zone volume (dB)", "zone-set-volume", false, true),
+                new TesterCommand("YNCA / Zones", "Set zone input (native ID)", "zone-set-input", false, true)
             };
             LstCommands.ItemsSource = commands;
             ICollectionView view = CollectionViewSource.GetDefaultView(LstCommands.ItemsSource);
@@ -80,7 +86,8 @@ namespace YamahaAvrNet.TesterGui
                     EnableExtendedControl = true,
                     EnableLegacyXml = true,
                     EnableYnca = true,
-                    EnableVerifiedSpeakerWrites = ChkEnableVerifiedWrites.IsChecked == true
+                    EnableVerifiedSpeakerWrites = ChkEnableVerifiedWrites.IsChecked == true,
+                    EnableYncaZoneWrites = ChkEnableYncaWrites.IsChecked == true
                 });
                 TxtConnectionStatus.Text = "Connecting...";
                 await next.InitializeAsync();
@@ -204,19 +211,27 @@ namespace YamahaAvrNet.TesterGui
                 LblPattern.Visibility = pattern ? Visibility.Visible : Visibility.Collapsed;
             if (TxtPattern != null)
                 TxtPattern.Visibility = pattern ? Visibility.Visible : Visibility.Collapsed;
+            bool zoneCommand = command != null && command.Key.StartsWith("zone-", StringComparison.Ordinal);
+            LblZone.Visibility = zoneCommand ? Visibility.Visible : Visibility.Collapsed;
+            TxtZone.Visibility = zoneCommand ? Visibility.Visible : Visibility.Collapsed;
             bool write = command != null && command.RequiresValue;
             if (LblWriteValue != null)
                 LblWriteValue.Visibility = write ? Visibility.Visible : Visibility.Collapsed;
             if (TxtWriteValue != null)
                 TxtWriteValue.Visibility = write ? Visibility.Visible : Visibility.Collapsed;
             if (TxtCommandHint != null)
-                TxtCommandHint.Text = write
-                    ? "Verified scope: RX-A3060 FW 2.86, active Pattern 1, Front_L only. " +
-                      (command.Key == "set-level" ? "Allowed: 0.0 or 0.5 dB." : "Allowed: 2.95 or 3.00 m.") +
-                      " Requires opt-in before connecting and confirmation for each write."
-                    : pattern
-                        ? "Use a pattern reported by your receiver. Reads do not alter settings."
-                        : "Commands read device information only.";
+                TxtCommandHint.Text = zoneCommand
+                    ? (write ? "YNCA zone writes change receiver settings. Require explicit opt-in, " +
+                        "device-reported validation, confirmation and readback. " +
+                        "Use On/Standby, On/Off, a dB value or a reported input ID as appropriate."
+                        : "Read discovered zone values. A missing value stays unknown.")
+                    : write
+                        ? "Verified scope: RX-A3060 FW 2.86, active Pattern 1, Front_L only. " +
+                          (command.Key == "set-level" ? "Allowed: 0.0 or 0.5 dB." : "Allowed: 2.95 or 3.00 m.") +
+                          " Requires opt-in before connecting and confirmation for each write."
+                        : pattern
+                            ? "Use a pattern reported by your receiver. Reads do not alter settings."
+                            : "Commands read device information only.";
             bool yncaCustom = command != null && command.Key == "ynca-custom";
             LblYncaSubunit.Visibility = yncaCustom ? Visibility.Visible : Visibility.Collapsed;
             TxtYncaSubunit.Visibility = yncaCustom ? Visibility.Visible : Visibility.Collapsed;
@@ -262,6 +277,11 @@ namespace YamahaAvrNet.TesterGui
             BeginOperation();
             try
             {
+                if (command.Key.StartsWith("zone-set-", StringComparison.Ordinal))
+                {
+                    await ExecuteZoneWriteAsync(command.Key);
+                    return;
+                }
                 if (command.RequiresValue)
                 {
                     if (ChkEnableVerifiedWrites.IsChecked != true)
@@ -318,6 +338,15 @@ namespace YamahaAvrNet.TesterGui
                 }
                 switch (command.Key)
                 {
+                    case "zone-status":
+                        var zoneState = await _receiver.ZoneControl.RefreshAsync(TxtZone.Text.Trim());
+                        AppendResult(FormatZone(zoneState));
+                        break;
+                    case "zone-cache":
+                        var snapshots = _receiver.ZoneControl.GetStates();
+                        AppendResult(snapshots.Count == 0 ? "No zone values have been observed yet."
+                            : string.Join(Environment.NewLine, snapshots.Values.Select(FormatZone)));
+                        break;
                     case "ynca-main":
                         foreach (string function in new[] { "PWR", "VOL", "MUTE", "INP" })
                             await DisplayYncaGetAsync("MAIN", function);
@@ -378,6 +407,70 @@ namespace YamahaAvrNet.TesterGui
             }
             catch (Exception ex) { AppendResult("Operation failed: " + ex.Message); }
             finally { EndOperation(); }
+        }
+
+        private async Task ExecuteZoneWriteAsync(string key)
+        {
+            if (ChkEnableYncaWrites.IsChecked != true)
+            {
+                AppendResult("YNCA writes are disabled. Enable the checkbox and reconnect.");
+                return;
+            }
+            string zone = TxtZone.Text.Trim();
+            string input = TxtWriteValue.Text.Trim();
+            // Only the library decides whether a specific zone/value can be written.
+            string question = "Send " + key + " to zone '" + zone + "' with value '" + input + "'?" +
+                "\nThis changes receiver settings and is NOT automatically restored.";
+            if (MessageBox.Show(this, question, "Confirm YNCA zone write",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                MessageBoxResult.No) != MessageBoxResult.Yes)
+            {
+                AppendResult("Write canceled. No command sent.");
+                return;
+            }
+            switch (key)
+            {
+                case "zone-set-power":
+                    if (string.Equals(input, "On", StringComparison.OrdinalIgnoreCase))
+                        await _receiver.ZoneControl.SetPowerAsync(zone, true);
+                    else if (string.Equals(input, "Standby", StringComparison.OrdinalIgnoreCase))
+                        await _receiver.ZoneControl.SetPowerAsync(zone, false);
+                    else throw new ArgumentException("Use On or Standby for power.");
+                    break;
+                case "zone-set-mute":
+                    if (string.Equals(input, "On", StringComparison.OrdinalIgnoreCase))
+                        await _receiver.ZoneControl.SetMuteAsync(zone, true);
+                    else if (string.Equals(input, "Off", StringComparison.OrdinalIgnoreCase))
+                        await _receiver.ZoneControl.SetMuteAsync(zone, false);
+                    else throw new ArgumentException("Use On or Off for mute.");
+                    break;
+                case "zone-set-volume":
+                    decimal db;
+                    if (!decimal.TryParse(input, NumberStyles.AllowLeadingSign |
+                        NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out db))
+                        throw new ArgumentException("Use an invariant decimal volume in dB (e.g. -36.5).");
+                    await _receiver.ZoneControl.SetVolumeDbAsync(zone, db);
+                    break;
+                case "zone-set-input":
+                    await _receiver.ZoneControl.SetInputAsync(zone, input);
+                    break;
+                default: throw new ArgumentException("Unknown zone write action.");
+            }
+            AppendResult("Readback observed the requested value. YNCA unsolicited updates " +
+                "cannot be distinguished from GET responses with absolute certainty.");
+            AppendResult(FormatZone(_receiver.ZoneControl.GetStates()
+                .Values.FirstOrDefault(x => string.Equals(x.NativeId, zone, StringComparison.OrdinalIgnoreCase))));
+        }
+
+        private static string FormatZone(YamahaZoneState zone)
+        {
+            if (zone == null) return "No zone value observed.";
+            return "Zone " + zone.NativeId + " | power=" +
+                (zone.IsPoweredOn.HasValue ? (zone.IsPoweredOn.Value ? "On" : "Standby") : "unknown") +
+                " | volume=" + (zone.VolumeDb.HasValue
+                    ? zone.VolumeDb.Value.ToString(CultureInfo.InvariantCulture) + " dB" : "unknown") +
+                " | mute=" + (zone.IsMuted.HasValue ? zone.IsMuted.Value.ToString() : "unknown") +
+                " | input=" + Show(zone.InputNativeId) + (zone.IsStale ? " [STALE]" : "");
         }
 
         private async Task DisplayYncaGetAsync(string subunit, string function)
@@ -502,7 +595,9 @@ namespace YamahaAvrNet.TesterGui
             LstCommands.IsEnabled = !_busy;
             TxtPattern.IsEnabled = !_busy;
             TxtWriteValue.IsEnabled = !_busy;
+            TxtZone.IsEnabled = !_busy;
             ChkEnableVerifiedWrites.IsEnabled = !_busy && _receiver == null;
+            ChkEnableYncaWrites.IsEnabled = !_busy && _receiver == null;
         }
 
         private void AppendResult(string message)

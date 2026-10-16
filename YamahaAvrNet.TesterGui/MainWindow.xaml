@@ -32,7 +32,7 @@
                     Width="110" Click="BtnYncaConnect_Click" IsEnabled="False"/>
             <Button x:Name="BtnYncaDisconnect" Content="Disconnect YNCA" Margin="6,0,0,0"
                     Width="120" Click="BtnYncaDisconnect_Click" IsEnabled="False"/>
-            <TextBlock Text="One shared YNCA TCP session; GET only."
+            <TextBlock Text="One shared YNCA TCP session; writes require opt-in."
                        Margin="12,0,0,0" VerticalAlignment="Center" Foreground="DimGray"/>
           </StackPanel>
         </StackPanel>
@@ -72,9 +72,11 @@
                 <StackPanel Grid.Row="1" Margin="0,8,0,0">
                     <TextBlock x:Name="LblPattern" Text="Speaker pattern number:" Visibility="Collapsed"/>
                     <TextBox x:Name="TxtPattern" Text="1" Margin="0,2,0,4" Visibility="Collapsed"/>
-                    <TextBlock x:Name="LblWriteValue" Text="Target value (invariant decimal, e.g. 0.5):"
+                    <TextBlock x:Name="LblWriteValue" Text="Target value (e.g. -36.5, On, AUDIO1):"
                                Visibility="Collapsed"/>
                     <TextBox x:Name="TxtWriteValue" Margin="0,2,0,4" Visibility="Collapsed"/>
+                    <TextBlock x:Name="LblZone" Text="Zone ID (main, zone2, zone3, zone4):" Visibility="Collapsed"/>
+                    <TextBox x:Name="TxtZone" Text="main" Margin="0,2,0,4" Visibility="Collapsed"/>
                     <TextBlock x:Name="LblYncaSubunit" Text="YNCA subunit (e.g. MAIN):" Visibility="Collapsed"/>
                     <TextBox x:Name="TxtYncaSubunit" Text="MAIN" Margin="0,2,0,4" Visibility="Collapsed"/>
                     <TextBlock x:Name="LblYncaFunction" Text="YNCA function (e.g. VOL):" Visibility="Collapsed"/>
@@ -82,9 +84,12 @@
                     <TextBlock x:Name="TxtCommandHint" TextWrapping="Wrap" Foreground="DimGray"
                                Text="Select an operation. All commands are read-only."/>
                 </StackPanel>
-                <CheckBox Grid.Row="2" x:Name="ChkEnableVerifiedWrites" Margin="0,8,0,0"
-                          Content="Enable limited RX-A3060 writes (reconnect required)"
-                          />
+                <StackPanel Grid.Row="2" Margin="0,8,0,0">
+                    <CheckBox x:Name="ChkEnableVerifiedWrites"
+                              Content="Enable limited RX-A3060 speaker writes (reconnect required)"/>
+                    <CheckBox x:Name="ChkEnableYncaWrites" Margin="0,5,0,0"
+                              Content="Enable YNCA zone writes (reconnect required)"/>
+                </StackPanel>
                 <CheckBox Grid.Row="3" x:Name="ChkClearBeforeOperation" Margin="0,8,0,0"
                           Content="Clear outputs before each operation"/>
                 <Button x:Name="BtnSend" Grid.Row="4" Content="Send" Height="30"

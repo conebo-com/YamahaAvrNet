@@ -135,6 +135,28 @@ namespace YamahaAvrNet.Sample
                     await ShowYncaAsync(receiver, parts[0], parts[1]);
                 }
                 Console.WriteLine();
+                if (Confirm("Read the detected zones via YNCA? [y/N]: "))
+                {
+                    foreach (var feature in receiver.DeviceFeatures.Zones)
+                    {
+                        try
+                        {
+                            YamahaZoneState zone = await receiver.ZoneControl.RefreshAsync(feature.NativeId);
+                            Console.WriteLine("Zone " + zone.NativeId +
+                                ": power=" + (zone.IsPoweredOn.HasValue ? (zone.IsPoweredOn.Value ? "On" : "Standby") : "unknown") +
+                                ", volume=" + (zone.VolumeDb.HasValue
+                                    ? zone.VolumeDb.Value.ToString(CultureInfo.InvariantCulture) + " dB" : "unknown") +
+                                ", mute=" + (zone.IsMuted.HasValue ? zone.IsMuted.Value.ToString() : "unknown") +
+                                ", input=" + Show(zone.InputNativeId) +
+                                (zone.IsStale ? " [stale]" : ""));
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("Zone " + feature.NativeId + " unavailable: " + ex.Message);
+                        }
+                    }
+                }
+                Console.WriteLine();
                 Console.WriteLine("Optional YNCA GET: enter SUBUNIT:FUNCTION (e.g. MAIN:VOL).");
                 Console.WriteLine("Press Enter to close the YNCA connection.");
                 while (true)

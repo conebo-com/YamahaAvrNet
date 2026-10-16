@@ -6,7 +6,7 @@ YamahaAvrNet is an independent C# library for controlling Yamaha AV receivers. I
 **Language baseline:** C# 7.3  
 **License:** MIT (see [LICENSE](LICENSE))
 
-**Current implementation status:** Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP connection and read-only status commands are now implemented. Active speaker configuration, PEQ, YNCA writes, writing other speaker channels and Pattern 2 remain unimplemented. The C# PUT implementation has not yet been live-verified. Historical RX-A3060 observations are documented separately from software implementation.
+**Current implementation status:** Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP GETs were successfully observed on the RX-A3060. Phase 4.2 adds typed zone status and optional YNCA power, mute, dB volume and input writes, all guarded by explicit opt-in and readback. These new YNCA writes have not yet been hardware-verified. Active speaker configuration, PEQ, writing other speaker channels and Pattern 2 remain unimplemented. The C# legacy XML PUT implementation also requires hardware verification. Historical RX-A3060 observations are documented separately from software implementation.
 
 ## Solution and projects
 
@@ -50,7 +50,7 @@ Enter the receiver IP address or hostname when prompted. Press **Enter** to acce
 
 The three GETs return device identity (model/firmware/API), system and per-zone functions, native zone/input/sound IDs, scene counts, native numeric ranges, speaker-pattern count and active pattern when the receiver reports them. These reads have been observed on an RX-A3060, firmware 2.86; other receiver models are not assumed compatible.
 
-The WPF application is a **manual** command and diagnostic interface, not an automated test suite. It refuses writes unless the user opted in before connecting and explicitly confirms the selected target and current setting. Its HTTP output displays operation summaries, **not captured raw network traffic**. The GUI now has YNCA connect/disconnect controls and an independent read-only command group; unsolicited TCP messages are shown in the YNCA pane. Bilingual language switching and compatibility-report export remain future GUI work. The core library contains no WPF dependency. The `net48` target does not imply supported Linux or Raspberry Pi execution.
+The WPF application is a **manual** command and diagnostic interface, not an automated test suite. It refuses writes unless the user opted in before connecting and explicitly confirms the selected target and current setting. Its HTTP output displays operation summaries, **not captured raw network traffic**. The GUI has YNCA connect/disconnect controls, read-only commands, and separately opted-in typed zone write commands with confirmation; unsolicited TCP messages are shown in the YNCA pane. Bilingual language switching and compatibility-report export remain future GUI work. The core library contains no WPF dependency. The `net48` target does not imply supported Linux or Raspberry Pi execution.
 
 ## Read-only YNCA TCP example
 
@@ -73,7 +73,7 @@ using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
 }
 ```
 
-The transport bounds request time, serializes GETs, handles split and combined TCP frames, interprets `@RESTRICTED`/`@UNDEFINED`, and resets the session after an ambiguous timeout. Push notifications can be indistinguishable from solicited replies: a matching observation is **not** a cryptographically or transactionally correlated acknowledgment. Read-only operations never infer write capabilities. A dropped connection is reported and a subsequent explicit GET reconnects; no background reconnect/keepalive is implemented yet. The code has not yet been exercised against the RX-A3060 in the current build.
+The transport bounds request time, serializes GETs, handles split and combined TCP frames, interprets `@RESTRICTED`/`@UNDEFINED`, and resets the session after an ambiguous timeout. Push notifications can be indistinguishable from solicited replies: a matching observation is **not** a cryptographically or transactionally correlated acknowledgment. Read-only operations never infer write capabilities. A dropped connection is reported and a subsequent explicit GET reconnects; no background reconnect/keepalive is implemented yet. The YNCA GET functionality was confirmed against the RX-A3060 in an interactive console run; optional zone writes remain unverified.
 
 ## Read-only speaker settings example
 
@@ -168,3 +168,37 @@ The XML files in [`docs/protocol-examples/rx-a3060/`](docs/protocol-examples/rx-
 The project's own source code is licensed under the MIT license in [LICENSE](LICENSE). Technical protocol references include [`mvdwetering/ynca`](https://github.com/mvdwetering/ynca) and Yamaha's device interfaces; **no Python source code or proprietary Yamaha documentation is included** in the present codebase. If third-party source or protected assets are included in the future, their applicable notices and licenses must be preserved.
 
 Do not commit private receiver backups, credentials, serial numbers, or unredacted network identifiers.
+
+### YNCA zone control (Phase 4.2)
+
+The existing shared YNCA TCP connection now provides `receiver.ZoneControl` for typed
+zone status reads and explicitly opted-in writes. The supported YNCA subunits are
+`MAIN`, `ZONE2`, `ZONE3`, and `ZONE4`, but **only if the receiver reports the
+corresponding zone** in Extended Control discovery. For example:
+
+```csharp
+await receiver.InitializeAsync(); // Extended Control: device and zone discovery
+var main = await receiver.ZoneControl.RefreshAsync("main");
+Console.WriteLine(main.VolumeDb); // dB, or null if not observed
+```
+
+Use `receiver.ZoneControl.GetStates()` to obtain snapshots, and subscribe to
+`ZoneStateChanged` for unsolicited YNCA updates. After disconnect, observed zone
+states are retained but explicitly marked `IsStale=true`. The normal sample
+program remains **read-only** and asks interactively whether to read the detected
+zones after connecting over YNCA.
+
+For optional manual writes, create the client with
+`EnableYncaZoneWrites = true` and explicitly invoke `SetPowerAsync`, `SetMuteAsync`,
+`SetVolumeDbAsync` or `SetInputAsync`. No write occurs during initialization,
+refresh, or normal YNCA status reading. Volume is expressed **only in dB** and
+requires device-reported `actual_volume_db` minimum, maximum and step; input
+writes require an input ID actually reported for the selected zone. The WPF
+tester asks for a separate write opt-in and a per-command confirmation.
+
+After any write, the library issues a GET for that same YNCA field and checks
+the observed value; it never retries a PUT automatically. YNCA has no request
+IDs, so even a matching observation is **not an absolute guarantee** that a
+spontaneous status message was not received instead of a response. This
+new write path has **not yet been confirmed on hardware**. Please verify
+receiver behavior before using it for routine control.

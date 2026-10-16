@@ -16,6 +16,19 @@ namespace YamahaAvrNet.Protocols.Ynca
                 function.ToUpperInvariant() + "=?\r\n");
         }
 
+        internal static byte[] Put(string subunit, string function, string value)
+        {
+            ValidateToken(subunit, nameof(subunit));
+            ValidateToken(function, nameof(function));
+            if (string.IsNullOrEmpty(value) || value.Length > 64)
+                throw new ArgumentException("YNCA parameter must be 1-64 characters.", nameof(value));
+            foreach (char c in value)
+                if (c < 32 || c > 126 || c == '=' || c == '?')
+                    throw new ArgumentException("Unsafe YNCA parameter character.", nameof(value));
+            return Encoding.ASCII.GetBytes("@" + subunit.ToUpperInvariant() + ":" +
+                function.ToUpperInvariant() + "=" + value + "\r\n");
+        }
+
         internal static void ValidateToken(string token, string paramName)
         {
             if (string.IsNullOrEmpty(token) || token.Length > 48)
