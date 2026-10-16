@@ -1,0 +1,3 @@
+<YAMAHA_AV cmd="GET">
+  <System><Speaker_Preout><Pattern_2><Distance>GetParam</Distance></Pattern_2></Speaker_Preout></System>
+</YAMAHA_AV>

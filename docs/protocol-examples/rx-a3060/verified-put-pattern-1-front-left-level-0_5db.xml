@@ -1,0 +1,5 @@
+<YAMAHA_AV cmd="PUT">
+  <System><Speaker_Preout><Pattern_1><Lvl><Front_L>
+    <Val>5</Val><Exp>1</Exp><Unit>dB</Unit>
+  </Front_L></Lvl></Pattern_1></Speaker_Preout></System>
+</YAMAHA_AV>

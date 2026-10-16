@@ -1,0 +1,5 @@
+<YAMAHA_AV cmd="PUT">
+  <System><Speaker_Preout><Pattern_1><Distance><Meter><Front_L>
+    <Val>300</Val><Exp>2</Exp><Unit>m</Unit>
+  </Front_L></Meter></Distance></Pattern_1></Speaker_Preout></System>
+</YAMAHA_AV>

@@ -1,0 +1,14 @@
+.vs/
+.vscode/
+.idea/
+**/bin/
+**/obj/
+packages/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.pdb
+*.cache
+*.tmp
+.DS_Store

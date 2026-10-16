@@ -1,0 +1,119 @@
+# Yamaha protocol reference
+
+This document records publicly useful protocol behavior and historical receiver observations, **not an implementation-completeness claim**. The reference device is a **Yamaha RX-A3060** running firmware **2.86** with Extended Control API **2.08**. Availability and limits can differ by model, firmware, and current receiver state.
+
+YamahaAvrNet is designed to use three protocol families together when available. None has been implemented as a working network provider in the current Phase 1 repository.
+
+## 1. YNCA (TCP / optionally serial)
+
+- Typical TCP port: **50000**, configurable where the receiver permits it.
+- Command/status framing: `@SUBUNIT:FUNCTION=VALUE` followed by `\r\n` (CRLF).
+- A GET uses `?`, e.g. `@MAIN:VOL=?\r\n`.
+- Unsolicited status events can have the same format as GET responses. There is no reliable request ID; correlation must not be represented as certain when it is not.
+- Distinguish `@RESTRICTED`, `@UNDEFINED`, no response, and connection/transport errors.
+- A receiver may impose a one-client limit. Command consumers and monitoring therefore share **one centrally managed YNCA session**, with serialized commands, timeouts, and reconnect handling.
+- Preserve unrecognized native subunit/function values rather than silently discarding them.
+
+The Python [`ynca` project](https://github.com/mvdwetering/ynca) is a protocol research reference only, not a source-code port.
+
+## 2. Yamaha Extended Control (HTTP/JSON)
+
+The following GET endpoints returned usable data on the RX-A3060:
+
+```text
+GET /YamahaExtendedControl/v1/system/getDeviceInfo
+GET /YamahaExtendedControl/v1/system/getFeatures
+GET /YamahaExtendedControl/v1/system/getFuncStatus
+```
+
+The device identified itself as `RX-A3060`, firmware `2.86`, API version `2.08`. `getFeatures` reported `speaker_pattern_num = 2`, `zone_num = 4`, dynamic zone information, scene counts, available inputs/sound programs, and various `range_step` values. `getFuncStatus` reported active speaker pattern `1`.
+
+For the main zone, the reported dB volume range was **−80.5 to +16.5 dB** with **0.5 dB** steps. The device's abstract numeric volume range (`0 ... 161` in the observed feature data) is not equivalent to dB. `zone_num`, `scene_num`, tuner/NETUSB presets, and `speaker_pattern_num` are distinct quantities.
+
+The `setSpeakerPattern?num=1|2` function is documented and advertised by the reference receiver, but a live pattern switch was **not verified**. Do not enable it merely because the endpoint name exists.
+
+A future provider must handle the HTTP response, JSON `response_code`, missing/extra fields, cancellation, and actual device capability evidence separately.
+
+## 3. Legacy Yamaha HTTP/XML
+
+Endpoint:
+
+```text
+POST http://<receiver>/YamahaRemoteControl/ctrl
+Content-Type: text/xml; charset=utf-8
+```
+
+Requests use `<YAMAHA_AV cmd="GET">` or `<YAMAHA_AV cmd="PUT">`. Evaluate the **HTTP status** and Yamaha's response attribute **`RC` independently**. On the reference device, `RC="0"` was observed for successful requests and `RC="2"` for certain rejected aggregate GET targets; these observations are **not** a universal return-code dictionary.
+
+### Verified aggregate reads
+
+A successful Pattern 1 level GET is structured as follows:
+
+```xml
+<YAMAHA_AV cmd="GET">
+  <System>
+    <Speaker_Preout>
+      <Pattern_1><Lvl>GetParam</Lvl></Pattern_1>
+    </Speaker_Preout>
+  </System>
+</YAMAHA_AV>
+```
+
+For distances, replace `Lvl` with `Distance`. For Pattern 2, use `Pattern_2`. The receiver accepted these **whole-block** GETs for both patterns, each returning native channel data.
+
+The active pattern was also read using:
+
+```xml
+<YAMAHA_AV cmd="GET">
+  <System>
+    <Speaker_Preout><Pattern_Sel>GetParam</Pattern_Sel></Speaker_Preout>
+  </System>
+</YAMAHA_AV>
+```
+
+A separate Main Zone status GET on `Main_Zone/Basic_Status` succeeded.
+
+By contrast, standalone GETs of `Lvl/Front_L` and `Distance/Meter/Front_L` returned **HTTP 400**, while some aggregate `Speaker_Preout`, `Pattern_1`, `Config`, and `PEQ` GETs returned `RC="2"`. **Do not infer arbitrary GET addresses from response tree structure.**
+
+### Verified, controlled writes on the reference device
+
+Only the following targeted Pattern 1 writes were verified by changing a value, reading it back, restoring the original, and reading it back again:
+
+| Target | Original | Temporary value | Restored value |
+| --- | ---: | ---: | ---: |
+| `Pattern_1/Lvl/Front_L` | 0.0 dB | +0.5 dB | 0.0 dB |
+| `Pattern_1/Distance/Meter/Front_L` | 2.95 m | 3.00 m | 2.95 m |
+
+The request structure for a single-channel level write was:
+
+```xml
+<YAMAHA_AV cmd="PUT">
+  <System>
+    <Speaker_Preout>
+      <Pattern_1>
+        <Lvl>
+          <Front_L><Val>5</Val><Exp>1</Exp><Unit>dB</Unit></Front_L>
+        </Lvl>
+      </Pattern_1>
+    </Speaker_Preout>
+  </System>
+</YAMAHA_AV>
+```
+
+A corresponding distance PUT places `Front_L` under `Pattern_1/Distance/Meter` with `Val`, `Exp`, and `Unit` children. Example: `Val=300`, `Exp=2`, `Unit=m` means `3.00 m`.
+
+The numerical rule in these responses is **physical value = `Val / 10^Exp`**, interpreted in the supplied `Unit`. For example, `Val=5`, `Exp=1` means `0.5 dB`; `Val=295`, `Exp=2` means `2.95 m`. Units and exponents must be read **per value** rather than assumed globally. Using `decimal` avoids unnecessary binary floating-point rounding for step-based settings.
+
+**No Pattern 2 write, pattern switch, arbitrary-channel write, or general Config/PEQ write was verified.** A future writer must check pattern, channel, write capability, range, units, and the original value; perform explicit user-approved writes with readback; and never blindly retry after a PUT timeout.
+
+### `desc.xml` is not a complete feature registry
+
+`/YamahaRemoteControl/desc.xml` describes many menu commands but did **not** include the working `Speaker_Preout` level/distance paths observed on the RX-A3060. Treat it as partial device metadata. The mere existence of a field in a device backup does not establish that the same path supports live GET or PUT.
+
+XML processing must disable DTD/external-entity resolution, enforce response-size limits, and build XML through APIs rather than untrusted tag interpolation.
+
+## 4. Request examples and scope
+
+The XML files under [`protocol-examples/rx-a3060/`](protocol-examples/rx-a3060/) contain **documented request payloads**, not simulated receiver responses. Their PUT examples are historical research artifacts and **must not be sent automatically**.
+
+For native channel names, active-versus-addressable distinctions, and pattern-specific settings, see [Speaker setup](SPEAKER_SETUP.md). For per-model evidence, see [Compatibility](COMPATIBILITY.md).
