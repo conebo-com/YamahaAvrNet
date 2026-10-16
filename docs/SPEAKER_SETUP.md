@@ -1,6 +1,6 @@
 # Speaker setup and native Yamaha channel IDs
 
-This reference describes observed **RX-A3060** speaker settings and the intended data semantics of YamahaAvrNet. This version implements read-only speaker communication; it does not imply write support or compatibility with other models.
+This reference describes observed **RX-A3060** speaker settings and the intended data semantics of YamahaAvrNet. This version implements speaker reads and a narrowly restricted, explicit opt-in PUT path. It does not imply write support or compatibility with other models.
 
 ## Native channels
 
@@ -50,8 +50,8 @@ The working GET targets are the **complete** `Lvl` and `Distance` blocks, not in
 
 A read-only inspection of an RX-A3060 backup found speaker configuration, channel placement, and PEQ data beneath pattern-specific paths. However, GET requests for entire `Config` and `PEQ` nodes were rejected (`RC="2"`). This does not establish whether individual child paths can be read; it certainly does not authorize writing them.
 
-The speaker API now implements `GetActivePatternAsync`, `GetLevelsAsync`, `GetDistancesAsync`, and `GetPatternsAsync`. The latter requires a valid pattern count from Extended Control discovery, then reads each pattern explicitly; it does not brute-force unknown pattern numbers. Channel information marks addressability and observed readable level/distance fields, while configured/active speaker status and write permissions remain unknown. Both `SetLevelAsync` and `SetDistanceAsync` remain disabled and throw `NotSupportedException` **without sending a command**.
+The speaker API now implements `GetActivePatternAsync`, `GetLevelsAsync`, `GetDistancesAsync`, and `GetPatternsAsync`. The latter requires a valid pattern count from Extended Control discovery, then reads each pattern explicitly; it does not brute-force unknown pattern numbers. Channel information marks addressability and observed readable level/distance fields, while configured/active speaker status and write permissions remain unknown. Both `SetLevelAsync` and `SetDistanceAsync` remain **disabled by default**. With explicit opt-in, they support only RX-A3060 firmware 2.86 / Pattern 1 / `Front_L`, with the exact previously verified level pair (0.0/0.5 dB) and distance pair (2.95/3.00 m). The existing setting must be one of the pair values; native exponent and unit must match the documented request. The current pattern must be Pattern 1. Pre-read, one PUT, RC validation and readback are required. The receiver state is unknown after a PUT timeout, so the library does not retry or auto-restore.
 
-Only previously confirmed aggregate GET paths are used. This code has not yet been verified on a connected RX-A3060; the historical receiver evidence remains separate.
+GET operations use previously confirmed aggregate paths. PUT generation uses only the historically confirmed targeted `Front_L` path. This C# writer has not yet been exercised on a connected RX-A3060; the prior verified hardware requests are separate evidence.
 
 See [Protocol reference](PROTOCOLS.md) and [Device compatibility](COMPATIBILITY.md) for observed commands and the exact evidence boundaries.

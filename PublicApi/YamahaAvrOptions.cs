@@ -23,6 +23,12 @@ namespace YamahaAvrNet.PublicApi
         public bool EnableLegacyXml { get; set; }
         public TimeSpan RequestTimeout { get; set; }
 
+        /// <summary>
+        /// Explicit opt-in for the narrowly verified RX-A3060 speaker writes.
+        /// Defaults to false and never enables writes during discovery.
+        /// </summary>
+        public bool EnableVerifiedSpeakerWrites { get; set; }
+
         internal YamahaAvrOptions CopyValidated()
         {
             if (string.IsNullOrWhiteSpace(Host))
@@ -49,7 +55,8 @@ namespace YamahaAvrNet.PublicApi
                 EnableYnca = EnableYnca,
                 EnableExtendedControl = EnableExtendedControl,
                 EnableLegacyXml = EnableLegacyXml,
-                RequestTimeout = RequestTimeout
+                RequestTimeout = RequestTimeout,
+                EnableVerifiedSpeakerWrites = EnableVerifiedSpeakerWrites
             };
         }
     }

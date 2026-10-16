@@ -2,7 +2,7 @@
 
 This document distinguishes **observed receiver behavior** from **features currently implemented by YamahaAvrNet**. Historical observations were made on a **Yamaha RX-A3060, firmware 2.86, Extended Control API 2.08**. They must not be generalized to other models or firmware versions.
 
-**Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker aggregate GETs are implemented in read-only mode; legacy PUT and YNCA remain **not implemented**. This build has not yet been verified against a physical receiver; historical hardware evidence below is separate from the implementation status.
+**Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker aggregate GETs are implemented and have now been exercised successfully on the user's RX-A3060 (firmware 2.86): both patterns returned 13 native level/distance channels. The Phase 3.2 C# implementation adds narrowly restricted opt-in PUT for Pattern 1 / `Front_L`; this new writer has not yet been exercised on the receiver. YNCA remains unimplemented.
 
 ## Capability terminology
 
@@ -41,13 +41,13 @@ A rejected request is not proof that an entire feature is unsupported. For examp
 
 | Area | Implemented in the C# library | Physical receiver validated with this build |
 | --- | --- | --- |
-| Extended Control device information (GET) | Yes | Not yet |
-| Extended Control feature lists, zones, scene counts and ranges (GET) | Yes | Not yet |
-| Extended Control function status (GET) | Yes | Not yet |
+| Extended Control device information (GET) | Yes | Yes: RX-A3060 firmware 2.86 |
+| Extended Control feature lists, zones, scene counts and ranges (GET) | Yes | Yes: four zones, scenes and speaker patterns reported |
+| Extended Control function status (GET) | Yes | Yes: active pattern 1 |
 | Extended Control writes / speaker-pattern switch | No | No |
-| Legacy XML active speaker pattern (GET) | Yes | Not yet with this build |
-| Legacy XML speaker PUT | No | No |
-| Legacy XML speaker levels and distances (aggregate GET) | Yes | Not yet with this build (historical RX-A3060 evidence above) |
+| Legacy XML active speaker pattern (GET) | Yes | Yes: active pattern 1 |
+| Legacy XML speaker PUT | Yes, limited opt-in for RX-A3060 2.86 / Pattern 1 / Front_L only | Not yet using this C# writer (previous controlled hardware writes verified) |
+| Legacy XML speaker levels and distances (aggregate GET) | Yes | Yes: 13 channels for both Pattern 1 and 2 |
 | YNCA state monitoring and commands | No | No |
 
 See [Protocol reference](PROTOCOLS.md) and [Speaker setup](SPEAKER_SETUP.md) for request formats and channel semantics.

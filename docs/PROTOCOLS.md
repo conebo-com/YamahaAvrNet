@@ -141,3 +141,7 @@ XML processing must disable DTD/external-entity resolution, enforce response-siz
 The XML files under [`protocol-examples/rx-a3060/`](protocol-examples/rx-a3060/) contain **documented request payloads**, not simulated receiver responses. Their PUT examples are historical research artifacts and **must not be sent automatically**.
 
 For native channel names, active-versus-addressable distinctions, and pattern-specific settings, see [Speaker setup](SPEAKER_SETUP.md). For per-model evidence, see [Compatibility](COMPATIBILITY.md).
+
+## Restricted PUT implementation (Phase 3.2)
+
+The library can now issue the **previously hardware-verified** legacy XML `PUT` path for `Pattern_1/Lvl/Front_L` and `Pattern_1/Distance/Meter/Front_L`, but only with explicit write opt-in, RX-A3060 firmware 2.86 identity, active Pattern 1 and confirmed native units/exponents. Only the reference values 0.0/0.5 dB or 2.95/3.00 m are accepted. Whole-aggregate GET reads provide preflight and post-write verification. HTTP success and Yamaha `RC=0` are checked separately; no automatic retries are made. This C# path still requires a real-device run before claiming it was verified in the new implementation.

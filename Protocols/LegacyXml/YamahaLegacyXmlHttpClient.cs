@@ -12,7 +12,7 @@ using YamahaAvrNet.PublicApi;
 
 namespace YamahaAvrNet.Protocols.LegacyXml
 {
-    /// <summary>Read-only HTTP/XML transport using the confirmed aggregate GET paths.</summary>
+    /// <summary>Bounded HTTP/XML transport. Writes are initiated only through guarded feature controllers.</summary>
     internal sealed class YamahaLegacyXmlHttpClient : IDisposable
     {
         private const int MaximumResponseBytes = 2 * 1024 * 1024;
@@ -39,13 +39,28 @@ namespace YamahaAvrNet.Protocols.LegacyXml
             _http.Timeout = Timeout.InfiniteTimeSpan;
         }
 
-        internal async Task<string> SendGetAsync(XDocument requestDocument, CancellationToken ct)
+        internal Task<string> SendGetAsync(XDocument requestDocument, CancellationToken ct)
+        {
+            return SendAsync(requestDocument, "GET", ct);
+        }
+
+        internal Task<string> SendPutAsync(XDocument requestDocument, CancellationToken ct)
+        {
+            return SendAsync(requestDocument, "PUT", ct);
+        }
+
+        private async Task<string> SendAsync(XDocument requestDocument, string commandType,
+            CancellationToken ct)
         {
             if (_disposed)
                 throw new ObjectDisposedException(nameof(YamahaLegacyXmlHttpClient));
             if (requestDocument == null)
                 throw new ArgumentNullException(nameof(requestDocument));
             ct.ThrowIfCancellationRequested();
+            if (requestDocument.Root == null ||
+                !string.Equals((string)requestDocument.Root.Attribute("cmd"), commandType,
+                    StringComparison.OrdinalIgnoreCase))
+                throw new YamahaValidationException("Legacy XML command type mismatch.");
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 timeout.CancelAfter(_timeout);
@@ -70,7 +85,7 @@ namespace YamahaAvrNet.Protocols.LegacyXml
                         {
                             if (!response.IsSuccessStatusCode)
                                 throw new YamahaLegacyXmlException(
-                                    "Legacy XML GET returned HTTP " + (int)response.StatusCode + ".");
+                                    "Legacy XML " + commandType + " returned HTTP " + (int)response.StatusCode + ".");
                             long? length = response.Content.Headers.ContentLength;
                             if (length.HasValue && length.Value > MaximumResponseBytes)
                                 throw new YamahaLegacyXmlException("Legacy XML response is too large.");
@@ -95,7 +110,8 @@ namespace YamahaAvrNet.Protocols.LegacyXml
                 {
                     if (ct.IsCancellationRequested)
                         throw;
-                    throw new YamahaTimeoutException("Legacy XML GET timed out.", ex);
+                    throw new YamahaTimeoutException("Legacy XML " + commandType +
+                        " timed out. The receiver state is unknown; read it again before another write.", ex);
                 }
                 catch (HttpRequestException ex)
                 {

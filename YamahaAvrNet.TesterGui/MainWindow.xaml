@@ -35,6 +35,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <Border Grid.Row="0" BorderBrush="Gray" BorderThickness="1">
                     <ListBox x:Name="LstCommands" SelectionChanged="LstCommands_SelectionChanged"
@@ -59,12 +60,18 @@
                 <StackPanel Grid.Row="1" Margin="0,8,0,0">
                     <TextBlock x:Name="LblPattern" Text="Speaker pattern number:" Visibility="Collapsed"/>
                     <TextBox x:Name="TxtPattern" Text="1" Margin="0,2,0,4" Visibility="Collapsed"/>
+                    <TextBlock x:Name="LblWriteValue" Text="Target value (invariant decimal, e.g. 0.5):"
+                               Visibility="Collapsed"/>
+                    <TextBox x:Name="TxtWriteValue" Margin="0,2,0,4" Visibility="Collapsed"/>
                     <TextBlock x:Name="TxtCommandHint" TextWrapping="Wrap" Foreground="DimGray"
                                Text="Select an operation. All commands are read-only."/>
                 </StackPanel>
-                <CheckBox Grid.Row="2" x:Name="ChkClearBeforeOperation" Margin="0,8,0,0"
+                <CheckBox Grid.Row="2" x:Name="ChkEnableVerifiedWrites" Margin="0,8,0,0"
+                          Content="Enable limited RX-A3060 writes (reconnect required)"
+                          />
+                <CheckBox Grid.Row="3" x:Name="ChkClearBeforeOperation" Margin="0,8,0,0"
                           Content="Clear outputs before each operation"/>
-                <Button x:Name="BtnSend" Grid.Row="3" Content="Send" Height="30"
+                <Button x:Name="BtnSend" Grid.Row="4" Content="Send" Height="30"
                         Margin="0,8,0,0" Click="BtnSend_Click" IsEnabled="False"/>
             </Grid>
             <Grid Grid.Column="1">
@@ -94,7 +101,7 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="Read-only mode: no receiver settings are changed."
+                    <TextBlock Grid.Column="0" Text="Read-only by default. Verified writes require opt-in and confirmation."
                                VerticalAlignment="Center" Foreground="DarkSlateGray"
                                TextWrapping="Wrap"/>
                     <Button x:Name="BtnClear" Grid.Column="1" Content="Clear outputs"

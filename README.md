@@ -6,7 +6,7 @@ YamahaAvrNet is an independent C# library for controlling Yamaha AV receivers. I
 **Language baseline:** C# 7.3  
 **License:** MIT (see [LICENSE](LICENSE))
 
-**Current implementation status:** Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and **read-only legacy Yamaha HTTP/XML speaker settings** are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Speaker writes, YNCA, active speaker configuration and PEQ are not implemented.** Hardware behavior with this C# build has not yet been validated. Historical RX-A3060 observations are documented separately from software implementation.
+**Current implementation status:** Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA, active speaker configuration, PEQ, writing other channels and Pattern 2 remain unimplemented. The C# PUT implementation has not yet been live-verified. Historical RX-A3060 observations are documented separately from software implementation.
 
 ## Solution and projects
 
@@ -16,7 +16,7 @@ Open **`YamahaAvrNet.slnx`**. The repository does not use a `.sln` file.
 | --- | --- | --- |
 | `YamahaAvrNet.csproj` + core source folders in the repository root | Standalone Yamaha library and Yamaha-specific API contracts | `net48` |
 | `YamahaAvrNet.Sample/` | Interactive receiver discovery and optional speaker reads | `net48` |
-| `YamahaAvrNet.TesterGui/` | Standalone WPF command browser with manual read-only operations | .NET Framework 4.8 |
+| `YamahaAvrNet.TesterGui/` | Standalone WPF command browser; read-only by default, optional confirmed verified-scope writes | .NET Framework 4.8 |
 
 All Yamaha library source files are located directly under the repository root (for example, `PublicApi/`, `Features/` and `Models/`). The root `YamahaAvrNet.csproj` explicitly includes only Yamaha source files. There are no `src/`, `samples/` or `tools/` wrapper directories.
 
@@ -38,7 +38,7 @@ From a Developer PowerShell for Visual Studio in the repository root:
 msbuild .\YamahaAvrNet.slnx /restore /p:Configuration=Debug
 ```
 
-To launch the GUI, open `YamahaAvrNet.slnx` in Visual Studio and select **`YamahaAvrNet.TesterGui`** as the startup project. Enter the receiver's IP address/hostname and HTTP port (normally `80`), then choose **Connect**. The left-hand grouped command list and right-hand result/HTTP/YNCA areas intentionally follow the DenonMarantz tester layout. No requests are sent on application startup.
+To launch the GUI, open `YamahaAvrNet.slnx` in Visual Studio and select **`YamahaAvrNet.TesterGui`** as the startup project. Enter the receiver's IP address/hostname and HTTP port (normally `80`), then choose **Connect**. By default, all operations are read-only; to permit the two historically verified RX-A3060 writes, select **Enable limited RX-A3060 writes** *before* connecting and confirm each write separately. No writing occurs automatically. The left-hand grouped command list and right-hand result/HTTP/YNCA areas intentionally follow the DenonMarantz tester layout. No requests are sent on application startup.
 
 The console sample asks for the receiver IP address or hostname and optional HTTP port **interactively** after starting. No command-line arguments are required:
 
@@ -48,9 +48,9 @@ The console sample asks for the receiver IP address or hostname and optional HTT
 
 Enter the receiver IP address or hostname when prompted. Press **Enter** to accept the default HTTP port `80`. The sample performs read-only discovery and displays the receiver information. It then asks whether to read legacy XML speaker settings. If selected, enter a reported pattern number to read levels and distances; press Enter to finish. No command-line parameters are required.
 
-The three GETs return device identity (model/firmware/API), system and per-zone functions, native zone/input/sound IDs, scene counts, native numeric ranges, speaker-pattern count and active pattern when the receiver reports them. **Actual device behavior is not automatically verified by merely compiling the library.**
+The three GETs return device identity (model/firmware/API), system and per-zone functions, native zone/input/sound IDs, scene counts, native numeric ranges, speaker-pattern count and active pattern when the receiver reports them. These reads have been observed on an RX-A3060, firmware 2.86; other receiver models are not assumed compatible.
 
-The WPF application is a **manual** command and diagnostic interface, not an automated test suite. Its HTTP output displays operation summaries, **not captured raw network traffic**. YNCA output, bilingual language switching, and compatibility-report export remain future GUI work. The core library contains no WPF dependency. The `net48` target does not imply supported Linux or Raspberry Pi execution.
+The WPF application is a **manual** command and diagnostic interface, not an automated test suite. It refuses writes unless the user opted in before connecting and explicitly confirms the selected target and current setting. Its HTTP output displays operation summaries, **not captured raw network traffic**. YNCA output, bilingual language switching, and compatibility-report export remain future GUI work. The core library contains no WPF dependency. The `net48` target does not imply supported Linux or Raspberry Pi execution.
 
 ## Read-only speaker settings example
 
@@ -75,6 +75,29 @@ using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
 
 Values retain their original `Val`, `Exp`, and `Unit` representation. Native channel IDs are read from the device, not a hardcoded channel list. Aggregate reads do **not** establish whether the listed speakers are configured. Pattern 2 reads were historically successful on the RX-A3060; writes to Pattern 2 have not been verified.
 
+
+## Verified-scope speaker writes (manual opt-in)
+
+These methods are disabled by default. The example below is **illustrative only**; do not run it without intending to change the receiver's speaker setting.
+
+```csharp
+using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
+{
+    Host = "192.168.1.50",
+    EnableYnca = false,
+    EnableExtendedControl = true,
+    EnableLegacyXml = true,
+    EnableVerifiedSpeakerWrites = true
+}))
+{
+    await receiver.InitializeAsync();
+    await receiver.Speakers.SetLevelAsync(1, "Front_L", 0.5m);
+    // Readback verification is performed internally; this does not auto-restore.
+}
+```
+
+Only `RX-A3060` firmware `2.86`, Pattern `1`, native channel `Front_L` is eligible. The allowed pairs are **level 0.0/0.5 dB** and **distance 2.95/3.00 m**, based on previously completed receiver writes and readback. The setting must already contain one of the verified pair values, with its native exponent and unit. The library reads the active pattern and the original value, sends one PUT, checks the Yamaha RC and reads the aggregate again to verify the result. A timeout or failed verification does **not** trigger a retry or rollback. Other models, firmware versions, channels and Pattern 2 stay read-only until independently verified.
+
 ## Read-only Extended Control example
 
 ```csharp
@@ -94,7 +117,7 @@ using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
 }
 ```
 
-The methods are cancellable. Extended Control checks HTTP status and Yamaha's JSON `response_code`; legacy XML checks HTTP status and XML `RC`. Both reject oversized or malformed responses and send no write requests. An isolated `receiver.ExtendedControl.GetFeaturesAsync()` call returns freshly parsed data but does not update the facade's cached state; `InitializeAsync` and `RefreshAsync` do.
+The methods are cancellable. Extended Control checks HTTP status and Yamaha's JSON `response_code`; legacy XML checks HTTP status and XML `RC`. Both reject oversized or malformed responses. HTTP/XML sends a PUT only through the restricted opt-in write methods; discovery remains read-only. An isolated `receiver.ExtendedControl.GetFeaturesAsync()` call returns freshly parsed data but does not update the facade's cached state; `InitializeAsync` and `RefreshAsync` do.
 
 The library uses `Newtonsoft.Json` 13.0.4, which provides a .NET Framework-compatible runtime implementation. The host address is never logged by the library.
 
@@ -107,7 +130,7 @@ The library uses `Newtonsoft.Json` 13.0.4, which provides a .NET Framework-compa
 - Extended Control volume ranges retain the receiver-reported **dB** values independently of its numerical display scale. Speaker levels and distances use `decimal` and preserve native unit and exponent.
 - Addressable speaker channels, configured speakers, and channels currently carrying a signal are distinct concepts.
 - YNCA command handling and status monitoring will share one receiver connection; the WPF application will not contain protocol-specific networking logic.
-- Discovery must remain read-only. Write operations require verified capabilities, explicit user action, validation, and readback rather than blind retries.
+- Discovery remains read-only. Setting `YamahaAvrOptions.EnableVerifiedSpeakerWrites = true` is required for writes; the current implementation additionally requires `RX-A3060` firmware `2.86`, exactly two advertised patterns, active Pattern `1`, channel `Front_L`, a recognized native encoding and an allowed reference value. Level writes are restricted to `0.0` or `0.5 dB`; distance writes to `2.95` or `3.00 m`. Before/after aggregate reads verify the operation. No blind retries or automatic restoration are attempted; if a write times out, the receiver state is unknown and must be checked before proceeding.
 
 ## Documentation
 

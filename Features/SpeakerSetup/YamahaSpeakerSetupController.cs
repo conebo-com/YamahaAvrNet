@@ -4,14 +4,15 @@ using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using YamahaAvrNet.Exceptions;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.Protocols.LegacyXml;
 
 namespace YamahaAvrNet.Features.SpeakerSetup
 {
     /// <summary>
-    /// Reads Yamaha-native speaker settings via known legacy XML aggregate paths.
-    /// No writes or pattern switches are performed by this implementation.
+    /// Reads native speaker settings and performs explicitly opted-in, RX-A3060-verified writes.
+    /// Other models, firmwares, patterns and channels are intentionally read-only.
     /// </summary>
     internal sealed class YamahaSpeakerSetupController : IYamahaSpeakerSetup
     {
@@ -20,12 +21,19 @@ namespace YamahaAvrNet.Features.SpeakerSetup
         private readonly Func<int?> _getReportedPatternCount;
         private readonly Func<CancellationToken, Task<int?>> _getExtendedActivePattern;
         private readonly Action<string, DateTimeOffset> _recordVerifiedRead;
+        private readonly Func<string> _getModel;
+        private readonly Func<string> _getFirmware;
+        private readonly bool _enableVerifiedSpeakerWrites;
+        private readonly SemaphoreSlim _writeGate = new SemaphoreSlim(1, 1);
 
         internal YamahaSpeakerSetupController(Action ensureNotDisposed,
             YamahaLegacyXmlHttpClient legacy,
             Func<int?> getReportedPatternCount,
             Func<CancellationToken, Task<int?>> getExtendedActivePattern,
-            Action<string, DateTimeOffset> recordVerifiedRead)
+            Action<string, DateTimeOffset> recordVerifiedRead,
+            Func<string> getModel,
+            Func<string> getFirmware,
+            bool enableVerifiedSpeakerWrites)
         {
             _ensureNotDisposed = ensureNotDisposed ??
                 throw new ArgumentNullException(nameof(ensureNotDisposed));
@@ -35,6 +43,9 @@ namespace YamahaAvrNet.Features.SpeakerSetup
             _getExtendedActivePattern = getExtendedActivePattern;
             _recordVerifiedRead = recordVerifiedRead ??
                 throw new ArgumentNullException(nameof(recordVerifiedRead));
+            _getModel = getModel ?? throw new ArgumentNullException(nameof(getModel));
+            _getFirmware = getFirmware ?? throw new ArgumentNullException(nameof(getFirmware));
+            _enableVerifiedSpeakerWrites = enableVerifiedSpeakerWrites;
         }
 
         public async Task<int?> GetActivePatternAsync(
@@ -113,21 +124,112 @@ namespace YamahaAvrNet.Features.SpeakerSetup
         public Task SetLevelAsync(int pattern, string nativeId, decimal decibels,
             CancellationToken cancellationToken = default(CancellationToken))
         {
-            _ensureNotDisposed();
-            cancellationToken.ThrowIfCancellationRequested();
-            CheckPattern(pattern);
-            CheckChannel(nativeId);
-            throw WritesUnavailable();
+            return WriteVerifiedAsync(pattern, nativeId, decibels, isDistance: false,
+                cancellationToken: cancellationToken);
         }
 
         public Task SetDistanceAsync(int pattern, string nativeId, decimal meters,
             CancellationToken cancellationToken = default(CancellationToken))
         {
-            _ensureNotDisposed();
+            return WriteVerifiedAsync(pattern, nativeId, meters, isDistance: true,
+                cancellationToken: cancellationToken);
+        }
+
+        private async Task WriteVerifiedAsync(int pattern, string nativeId, decimal requested,
+            bool isDistance, CancellationToken cancellationToken)
+        {
+            CheckRead();
             cancellationToken.ThrowIfCancellationRequested();
-            CheckPattern(pattern);
-            CheckChannel(nativeId);
-            throw WritesUnavailable();
+            CheckVerifiedWriteAllowed(pattern, nativeId, requested, isDistance);
+
+            await _writeGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                // Never infer write permission from the channel's presence in a GET response.
+                CheckVerifiedWriteAllowed(pattern, nativeId, requested, isDistance);
+                int? active = await GetActivePatternAsync(cancellationToken).ConfigureAwait(false);
+                if (active != 1)
+                    throw new YamahaFeatureTemporarilyUnavailableException(
+                        "Pattern 1 must be active for this historically verified write path.");
+
+                var before = await ReadForWriteAsync(isDistance, cancellationToken).ConfigureAwait(false);
+                YamahaSpeakerValue original = GetFrontLeft(before);
+                int exponent = isDistance ? 2 : 1;
+                string unit = isDistance ? "m" : "dB";
+                if (original.Exponent != exponent ||
+                    !string.Equals(original.Unit, unit, StringComparison.OrdinalIgnoreCase))
+                    throw new YamahaValidationException(
+                        "Unexpected native exponent or unit. No write was sent.");
+                if (!IsVerifiedValue(original.Value, isDistance))
+                    throw new YamahaValidationException(
+                        "Current Front_L setting is outside the verified reference values. No write was sent.");
+                if (original.Value == requested)
+                    return; // The current GET already confirms the requested value.
+
+                decimal raw = requested * (isDistance ? 100m : 10m);
+                var put = isDistance
+                    ? YamahaLegacyXmlCommandBuilder.VerifiedFrontLeftDistance(pattern, raw, exponent)
+                    : YamahaLegacyXmlCommandBuilder.VerifiedFrontLeftLevel(pattern, raw, exponent);
+
+                // Never retry a PUT automatically. A timeout may mean the device did apply it.
+                string response = await _legacy.SendPutAsync(put, cancellationToken)
+                    .ConfigureAwait(false);
+                YamahaLegacyXmlResponseParser.ValidatePutResponse(response);
+
+                var after = await ReadForWriteAsync(isDistance, cancellationToken)
+                    .ConfigureAwait(false);
+                var confirmed = GetFrontLeft(after);
+                if (confirmed.Value != requested)
+                    throw new YamahaStateVerificationException(
+                        "PUT returned success, but readback did not confirm the requested Front_L value. " +
+                        "Do not retry without checking the receiver state.");
+                int? activeAfter = await GetActivePatternAsync(cancellationToken).ConfigureAwait(false);
+                if (activeAfter != 1)
+                    throw new YamahaStateVerificationException(
+                        "Speaker pattern changed during write verification. Check the receiver manually.");
+            }
+            finally { _writeGate.Release(); }
+        }
+
+        private Task<IReadOnlyDictionary<string, YamahaSpeakerValue>> ReadForWriteAsync(
+            bool isDistance, CancellationToken ct)
+        {
+            return isDistance ? GetDistancesAsync(1, ct) : GetLevelsAsync(1, ct);
+        }
+
+        private static YamahaSpeakerValue GetFrontLeft(
+            IReadOnlyDictionary<string, YamahaSpeakerValue> values)
+        {
+            YamahaSpeakerValue value;
+            if (!values.TryGetValue("Front_L", out value))
+                throw new YamahaLegacyXmlException(
+                    "Front_L is missing from the aggregate response. Current receiver state is unknown.");
+            return value;
+        }
+
+        private void CheckVerifiedWriteAllowed(int pattern, string nativeId, decimal requested,
+            bool isDistance)
+        {
+            if (!_enableVerifiedSpeakerWrites)
+                throw new YamahaFeatureNotSupportedException(
+                    "Verified speaker writes are disabled. Set EnableVerifiedSpeakerWrites explicitly.");
+            if (_getModel() != "RX-A3060" || _getFirmware() != "2.86" ||
+                _getReportedPatternCount() != 2)
+                throw new YamahaFeatureNotSupportedException(
+                    "Verified writes are restricted to RX-A3060 firmware 2.86 with two patterns.");
+            if (pattern != 1 || nativeId != "Front_L")
+                throw new YamahaFeatureNotSupportedException(
+                    "Only Pattern 1 / Front_L has a verified write path. No write was sent.");
+            if (!IsVerifiedValue(requested, isDistance))
+                throw new YamahaValidationException(isDistance
+                    ? "Only 2.95 m and 3.00 m are allowed by the verified distance scope."
+                    : "Only 0.0 dB and +0.5 dB are allowed by the verified level scope.");
+        }
+
+        private static bool IsVerifiedValue(decimal value, bool isDistance)
+        {
+            return isDistance ? value == 2.95m || value == 3.00m
+                : value == 0m || value == 0.5m;
         }
 
         private void CheckRead()
@@ -143,22 +245,10 @@ namespace YamahaAvrNet.Features.SpeakerSetup
                 throw new ArgumentOutOfRangeException(nameof(pattern));
         }
 
-        private static void CheckChannel(string nativeId)
-        {
-            if (string.IsNullOrWhiteSpace(nativeId))
-                throw new ArgumentException("A native speaker channel ID is required.", nameof(nativeId));
-        }
-
         private static NotSupportedException LegacyUnavailable()
         {
             return new NotSupportedException(
                 "Legacy Yamaha HTTP/XML is disabled or unavailable for this client.");
-        }
-
-        private static NotSupportedException WritesUnavailable()
-        {
-            return new NotSupportedException(
-                "Speaker PUT commands are not implemented. No receiver setting was changed.");
         }
     }
 }

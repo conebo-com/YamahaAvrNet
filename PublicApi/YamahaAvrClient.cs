@@ -12,7 +12,7 @@ namespace YamahaAvrNet.PublicApi
 {
     /// <summary>
     /// Independent Yamaha receiver facade. Supports Extended Control discovery
-    /// and read-only legacy HTTP/XML speaker parameters; no write commands.
+    /// and guarded, explicitly opted-in legacy XML writes for verified RX-A3060 parameters.
     /// </summary>
     public sealed class YamahaAvrClient : IDisposable
     {
@@ -48,7 +48,9 @@ namespace YamahaAvrNet.PublicApi
                 ? new YamahaLegacyXmlHttpClient(_options) : null;
             Speakers = new YamahaSpeakerSetupController(EnsureNotDisposed, _legacyXml,
                 GetReportedSpeakerPatternCount, GetExtendedActivePatternAsync,
-                RecordSpeakerRead);
+                RecordSpeakerRead, () => Model,
+                () => DeviceInfo == null ? null : DeviceInfo.SystemVersion,
+                _options.EnableVerifiedSpeakerWrites);
         }
 
         public string Host { get { return _options.Host; } }

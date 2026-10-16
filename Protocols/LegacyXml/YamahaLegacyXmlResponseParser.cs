@@ -17,7 +17,7 @@ namespace YamahaAvrNet.Protocols.LegacyXml
         private static readonly Regex PatternNumber = new Regex(@"^Pattern\s*([0-9]+)$",
             RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
-        internal static XElement ParseResponse(string xml)
+        internal static XElement ParseResponse(string xml, string expectedResponse = "GET")
         {
             if (string.IsNullOrWhiteSpace(xml))
                 throw new YamahaLegacyXmlException("Legacy XML response is empty.");
@@ -42,20 +42,25 @@ namespace YamahaAvrNet.Protocols.LegacyXml
                     throw new YamahaLegacyXmlException("Unexpected legacy XML response root.");
                 string responseType = (string)root.Attribute("rsp");
                 if (!string.IsNullOrEmpty(responseType) &&
-                    !string.Equals(responseType, "GET", StringComparison.OrdinalIgnoreCase))
-                    throw new YamahaLegacyXmlException("Legacy XML response is not a GET reply.");
+                    !string.Equals(responseType, expectedResponse, StringComparison.OrdinalIgnoreCase))
+                    throw new YamahaLegacyXmlException("Legacy XML response is not a " + expectedResponse + " reply.");
                 var rc = (string)root.Attribute("RC");
                 if (string.IsNullOrWhiteSpace(rc))
                     throw new YamahaLegacyXmlException("Legacy XML response has no Yamaha RC attribute.");
                 if (rc != "0")
                     throw new YamahaLegacyXmlException(
-                        "Yamaha rejected the legacy XML GET request (RC=" + rc + ").");
+                        "Yamaha rejected the legacy XML " + expectedResponse + " request (RC=" + rc + ").");
                 return root;
             }
             catch (XmlException ex)
             {
                 throw new YamahaLegacyXmlException("Malformed or unsafe Yamaha legacy XML response.", ex);
             }
+        }
+
+        internal static void ValidatePutResponse(string xml)
+        {
+            ParseResponse(xml, "PUT");
         }
 
         internal static int? ParseActivePattern(string xml)

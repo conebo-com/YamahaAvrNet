@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -34,7 +35,9 @@ namespace YamahaAvrNet.TesterGui
                 new TesterCommand("Speaker Setup", "Read active speaker pattern", "active"),
                 new TesterCommand("Speaker Setup", "Read all advertised patterns", "patterns"),
                 new TesterCommand("Speaker Setup", "Read speaker levels", "levels", true),
-                new TesterCommand("Speaker Setup", "Read speaker distances", "distances", true)
+                new TesterCommand("Speaker Setup", "Read speaker distances", "distances", true),
+                new TesterCommand("Speaker Setup", "Set Front_L level (verified)", "set-level", true, true),
+                new TesterCommand("Speaker Setup", "Set Front_L distance (verified)", "set-distance", true, true)
             };
             LstCommands.ItemsSource = commands;
             ICollectionView view = CollectionViewSource.GetDefaultView(LstCommands.ItemsSource);
@@ -64,7 +67,8 @@ namespace YamahaAvrNet.TesterGui
                     HttpPort = port,
                     EnableExtendedControl = true,
                     EnableLegacyXml = true,
-                    EnableYnca = false
+                    EnableYnca = false,
+                    EnableVerifiedSpeakerWrites = ChkEnableVerifiedWrites.IsChecked == true
                 });
                 TxtConnectionStatus.Text = "Connecting...";
                 await next.InitializeAsync();
@@ -131,10 +135,19 @@ namespace YamahaAvrNet.TesterGui
                 LblPattern.Visibility = pattern ? Visibility.Visible : Visibility.Collapsed;
             if (TxtPattern != null)
                 TxtPattern.Visibility = pattern ? Visibility.Visible : Visibility.Collapsed;
+            bool write = command != null && command.RequiresValue;
+            if (LblWriteValue != null)
+                LblWriteValue.Visibility = write ? Visibility.Visible : Visibility.Collapsed;
+            if (TxtWriteValue != null)
+                TxtWriteValue.Visibility = write ? Visibility.Visible : Visibility.Collapsed;
             if (TxtCommandHint != null)
-                TxtCommandHint.Text = pattern
-                    ? "Use a pattern reported by your receiver. No values are changed."
-                    : "Commands read device information only.";
+                TxtCommandHint.Text = write
+                    ? "Verified scope: RX-A3060 FW 2.86, active Pattern 1, Front_L only. " +
+                      (command.Key == "set-level" ? "Allowed: 0.0 or 0.5 dB." : "Allowed: 2.95 or 3.00 m.") +
+                      " Requires opt-in before connecting and confirmation for each write."
+                    : pattern
+                        ? "Use a pattern reported by your receiver. Reads do not alter settings."
+                        : "Commands read device information only.";
             UpdateControls();
         }
 
@@ -175,6 +188,60 @@ namespace YamahaAvrNet.TesterGui
             BeginOperation();
             try
             {
+                if (command.RequiresValue)
+                {
+                    if (ChkEnableVerifiedWrites.IsChecked != true)
+                    {
+                        AppendResult("Write mode is disabled. Enable it and reconnect to the receiver.");
+                        return;
+                    }
+                    if (pattern != 1)
+                    {
+                        AppendResult("Verified writes are limited to Pattern 1. No PUT was sent.");
+                        return;
+                    }
+                    decimal target;
+                    if (!decimal.TryParse(TxtWriteValue.Text.Trim(),
+                        NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint,
+                        CultureInfo.InvariantCulture, out target))
+                    {
+                        AppendResult("Enter a decimal value using a dot (e.g. 0.5 or 2.95).");
+                        return;
+                    }
+                    bool distance = command.Key == "set-distance";
+                    var currentValues = distance
+                        ? await _receiver.Speakers.GetDistancesAsync(pattern)
+                        : await _receiver.Speakers.GetLevelsAsync(pattern);
+                    YamahaSpeakerValue oldValue;
+                    if (!currentValues.TryGetValue("Front_L", out oldValue))
+                    {
+                        AppendResult("The Front_L channel was not returned. No write was sent.");
+                        return;
+                    }
+                    var question = "Write " + target.ToString(CultureInfo.InvariantCulture) +
+                        (distance ? " m" : " dB") + " to Pattern " + pattern + " / Front_L?" +
+                        "\nCurrent value: " + oldValue.Value.ToString(CultureInfo.InvariantCulture) +
+                        " " + oldValue.Unit +
+                        "\nThis changes the AVR configuration. It is not automatically restored.";
+                    if (MessageBox.Show(this, question, "Confirm Yamaha speaker write",
+                        MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                        MessageBoxResult.No) != MessageBoxResult.Yes)
+                    {
+                        AppendResult("Write canceled by user. No PUT was sent.");
+                        return;
+                    }
+                    AppendHttp("POST /YamahaRemoteControl/ctrl (verified PUT Pattern_1/" +
+                        (distance ? "Distance/Meter" : "Lvl") + "/Front_L; readback required)");
+                    if (distance)
+                        await _receiver.Speakers.SetDistanceAsync(pattern, "Front_L", target);
+                    else
+                        await _receiver.Speakers.SetLevelAsync(pattern, "Front_L", target);
+                    AppendResult("Write completed and verified by the library. Previous value: " +
+                        oldValue.Value.ToString(CultureInfo.InvariantCulture) + " " + oldValue.Unit +
+                        "; confirmed value: " + target.ToString(CultureInfo.InvariantCulture) +
+                        (distance ? " m" : " dB"));
+                    return;
+                }
                 switch (command.Key)
                 {
                     case "summary":
@@ -323,6 +390,8 @@ namespace YamahaAvrNet.TesterGui
             TxtPort.IsEnabled = !_busy;
             LstCommands.IsEnabled = !_busy;
             TxtPattern.IsEnabled = !_busy;
+            TxtWriteValue.IsEnabled = !_busy;
+            ChkEnableVerifiedWrites.IsEnabled = !_busy && _receiver == null;
         }
 
         private void AppendResult(string message)
@@ -359,18 +428,21 @@ namespace YamahaAvrNet.TesterGui
 
         private sealed class TesterCommand
         {
-            internal TesterCommand(string group, string name, string key, bool requiresPattern = false)
+            internal TesterCommand(string group, string name, string key, bool requiresPattern = false,
+                bool requiresValue = false)
             {
                 Group = group;
                 Name = name;
                 Key = key;
                 RequiresPattern = requiresPattern;
+                RequiresValue = requiresValue;
             }
 
             public string Group { get; private set; }
             public string Name { get; private set; }
             public string Key { get; private set; }
             public bool RequiresPattern { get; private set; }
+            public bool RequiresValue { get; private set; }
         }
     }
 }
