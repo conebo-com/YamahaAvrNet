@@ -7,6 +7,7 @@ using YamahaAvrNet.Features.SpeakerSetup;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.Protocols.ExtendedControl;
 using YamahaAvrNet.Protocols.LegacyXml;
+using YamahaAvrNet.Protocols.Ynca;
 
 namespace YamahaAvrNet.PublicApi
 {
@@ -22,6 +23,7 @@ namespace YamahaAvrNet.PublicApi
         private readonly YamahaAvrOptions _options;
         private readonly YamahaExtendedHttpClient _extendedHttp;
         private readonly YamahaLegacyXmlHttpClient _legacyXml;
+        private readonly YamahaYncaTcpSession _yncaSession;
         private readonly SemaphoreSlim _lifecycleGate = new SemaphoreSlim(1, 1);
         private readonly object _stateSync = new object();
         private YamahaDeviceCapabilities _capabilities;
@@ -46,6 +48,9 @@ namespace YamahaAvrNet.PublicApi
                 ? new YamahaExtendedHttpClient(_options) : null;
             _legacyXml = _options.EnableLegacyXml
                 ? new YamahaLegacyXmlHttpClient(_options) : null;
+            _yncaSession = _options.EnableYnca
+                ? new YamahaYncaTcpSession(_options.Host, _options.YncaPort, _options.RequestTimeout) : null;
+            Ynca = _yncaSession == null ? null : new YamahaYncaController(_yncaSession);
             Speakers = new YamahaSpeakerSetupController(EnsureNotDisposed, _legacyXml,
                 GetReportedSpeakerPatternCount, GetExtendedActivePatternAsync,
                 RecordSpeakerRead, () => Model,
@@ -84,6 +89,9 @@ namespace YamahaAvrNet.PublicApi
         /// <summary>Null when Extended Control is disabled in the options.</summary>
         public IYamahaExtendedControl ExtendedControl { get { EnsureNotDisposed(); return _extendedHttp; } }
         public IYamahaSpeakerSetup Speakers { get; private set; }
+
+        /// <summary>Optional shared YNCA TCP session. Connecting it never writes AVR settings.</summary>
+        public IYamahaYnca Ynca { get; private set; }
 
         public YamahaExtendedDeviceInfo DeviceInfo
         {
@@ -245,7 +253,9 @@ namespace YamahaAvrNet.PublicApi
             try
             {
                 EnsureNotDisposed();
-                // HTTP is stateless. Mark snapshots stale; no persistent YNCA session exists yet.
+                // HTTP is stateless; close the separate persistent YNCA session.
+                if (_yncaSession != null)
+                    _yncaSession.Disconnect();
                 lock (_stateSync)
                 {
                     _connectionState = YamahaConnectionState.Disconnected;
@@ -351,6 +361,8 @@ namespace YamahaAvrNet.PublicApi
                 _extendedHttp.Dispose();
             if (_legacyXml != null)
                 _legacyXml.Dispose();
+            if (_yncaSession != null)
+                _yncaSession.Dispose();
             lock (_stateSync) _connectionState = YamahaConnectionState.Disposed;
         }
     }

@@ -9,7 +9,8 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+        <StackPanel Grid.Row="0" Orientation="Vertical" Margin="0,0,0,8">
+          <StackPanel Orientation="Horizontal">
             <TextBlock Text="Host:" VerticalAlignment="Center" Margin="0,0,6,0"/>
             <TextBox x:Name="TxtHost" Width="180" VerticalAlignment="Center"
                      ToolTip="Receiver IP address or hostname"/>
@@ -23,6 +24,17 @@
                     Click="BtnDisconnect_Click" IsEnabled="False"/>
             <TextBlock x:Name="TxtConnectionStatus" Text="Not connected"
                        Margin="12,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+            <TextBlock Text="YNCA TCP port:" VerticalAlignment="Center" Margin="0,0,6,0"/>
+            <TextBox x:Name="TxtYncaPort" Text="50000" Width="65" VerticalAlignment="Center"/>
+            <Button x:Name="BtnYncaConnect" Content="Connect YNCA" Margin="8,0,0,0"
+                    Width="110" Click="BtnYncaConnect_Click" IsEnabled="False"/>
+            <Button x:Name="BtnYncaDisconnect" Content="Disconnect YNCA" Margin="6,0,0,0"
+                    Width="120" Click="BtnYncaDisconnect_Click" IsEnabled="False"/>
+            <TextBlock Text="One shared YNCA TCP session; GET only."
+                       Margin="12,0,0,0" VerticalAlignment="Center" Foreground="DimGray"/>
+          </StackPanel>
         </StackPanel>
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
@@ -63,6 +75,10 @@
                     <TextBlock x:Name="LblWriteValue" Text="Target value (invariant decimal, e.g. 0.5):"
                                Visibility="Collapsed"/>
                     <TextBox x:Name="TxtWriteValue" Margin="0,2,0,4" Visibility="Collapsed"/>
+                    <TextBlock x:Name="LblYncaSubunit" Text="YNCA subunit (e.g. MAIN):" Visibility="Collapsed"/>
+                    <TextBox x:Name="TxtYncaSubunit" Text="MAIN" Margin="0,2,0,4" Visibility="Collapsed"/>
+                    <TextBlock x:Name="LblYncaFunction" Text="YNCA function (e.g. VOL):" Visibility="Collapsed"/>
+                    <TextBox x:Name="TxtYncaFunction" Text="VOL" Margin="0,2,0,4" Visibility="Collapsed"/>
                     <TextBlock x:Name="TxtCommandHint" TextWrapping="Wrap" Foreground="DimGray"
                                Text="Select an operation. All commands are read-only."/>
                 </StackPanel>
@@ -95,7 +111,7 @@
                 <TextBlock Grid.Row="4" Text="YNCA / TCP output" FontWeight="Bold"/>
                 <TextBox x:Name="TxtYncaOutput" Grid.Row="5" IsReadOnly="True" FontFamily="Consolas"
                          TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
-                         Margin="0,2,0,8" Text="YNCA will be available in a later phase."/>
+                         Margin="0,2,0,8" Text="YNCA not connected. Open the shared TCP session to receive status updates."/>
                 <Grid Grid.Row="6" Margin="0,4,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>

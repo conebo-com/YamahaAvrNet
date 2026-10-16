@@ -2,7 +2,7 @@
 
 This document records publicly useful protocol behavior and historical receiver observations, **not an implementation-completeness claim**. The reference device is a **Yamaha RX-A3060** running firmware **2.86** with Extended Control API **2.08**. Availability and limits can differ by model, firmware, and current receiver state.
 
-YamahaAvrNet is designed to use three protocol families together when available. **The implementation supports three read-only Extended Control GET endpoints and legacy XML speaker aggregate GETs.** YNCA remains a documented reference and is not implemented yet.
+YamahaAvrNet is designed to use three protocol families together when available. The implementation includes three Extended Control GET endpoints, legacy XML speaker GETs and limited opt-in verified-scope PUTs, plus a read-only YNCA TCP session. YNCA writes and higher-level YNCA feature controllers are not yet implemented.
 
 ## 1. YNCA (TCP / optionally serial)
 
@@ -11,8 +11,18 @@ YamahaAvrNet is designed to use three protocol families together when available.
 - A GET uses `?`, e.g. `@MAIN:VOL=?\r\n`.
 - Unsolicited status events can have the same format as GET responses. There is no reliable request ID; correlation must not be represented as certain when it is not.
 - Distinguish `@RESTRICTED`, `@UNDEFINED`, no response, and connection/transport errors.
-- A receiver may impose a one-client limit. Command consumers and monitoring therefore share **one centrally managed YNCA session**, with serialized commands, timeouts, and reconnect handling.
+- A receiver may impose a one-client limit. Command consumers and monitoring therefore share **one centrally managed YNCA session**, with serialized GETs, timeouts, and reconnect-on-demand after a dropped or reset connection.
 - Preserve unrecognized native subunit/function values rather than silently discarding them.
+
+### Implemented YNCA TCP foundation (Phase 4.1)
+
+- The public `receiver.Ynca` facade is available only when `EnableYnca` is enabled. `ConnectAsync()` explicitly opens the TCP session; `GetAsync(subunit, function)` also reconnects if the session was closed.
+- GET commands are limited to validated ASCII subunit/function identifiers and use `@SUBUNIT:FUNCTION=?\r\n`; **no write API or raw PUT passthrough is exposed**.
+- A single background reader handles fragmented/combined TCP messages, strips CRLF, enforces a 4096-byte maximum line length, preserves unknown native messages and publishes `MessageReceived` events.
+- Incoming values are cached by native `SUBUNIT:FUNCTION` key. Each `GetAsync` is serialized; a pending request accepts a matching observed value or `@RESTRICTED`/`@UNDEFINED`. Unsolicited updates are not falsely labeled as uniquely correlated GET replies.
+- Cancellation, connect timeouts, request timeouts and connection loss are handled explicitly. After a request fault, the session is closed rather than reused with potentially delayed responses. A later explicit GET opens a new connection; there is no unrequested background reconnection or keepalive in this phase.
+- Windows WPF and interactive console sample provide manual read-only access. Neither triggers YNCA connection when the application starts.
+- YNCA over serial, write commands, full per-model command discovery, keepalive and background reconnect remain planned work. Physical receiver verification of this C# implementation is still pending.
 
 The Python [`ynca` project](https://github.com/mvdwetering/ynca) is a protocol research reference only, not a source-code port.
 

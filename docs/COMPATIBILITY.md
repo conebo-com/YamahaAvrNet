@@ -2,7 +2,7 @@
 
 This document distinguishes **observed receiver behavior** from **features currently implemented by YamahaAvrNet**. Historical observations were made on a **Yamaha RX-A3060, firmware 2.86, Extended Control API 2.08**. They must not be generalized to other models or firmware versions.
 
-**Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker aggregate GETs are implemented and have now been exercised successfully on the user's RX-A3060 (firmware 2.86): both patterns returned 13 native level/distance channels. The Phase 3.2 C# implementation adds narrowly restricted opt-in PUT for Pattern 1 / `Front_L`; this new writer has not yet been exercised on the receiver. YNCA remains unimplemented.
+**Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker aggregate GETs are implemented and have now been exercised successfully on the user's RX-A3060 (firmware 2.86): both patterns returned 13 native level/distance channels. The Phase 3.2 C# implementation adds narrowly restricted opt-in PUT for Pattern 1 / `Front_L`; this new writer has not yet been exercised on the receiver. YNCA TCP GET and unsolicited status reception are implemented but have not yet been live-verified with this C# build.
 
 ## Capability terminology
 
@@ -48,6 +48,7 @@ A rejected request is not proof that an entire feature is unsupported. For examp
 | Legacy XML active speaker pattern (GET) | Yes | Yes: active pattern 1 |
 | Legacy XML speaker PUT | Yes, limited opt-in for RX-A3060 2.86 / Pattern 1 / Front_L only | Not yet using this C# writer (previous controlled hardware writes verified) |
 | Legacy XML speaker levels and distances (aggregate GET) | Yes | Yes: 13 channels for both Pattern 1 and 2 |
-| YNCA state monitoring and commands | No | No |
+| YNCA TCP GETs and unsolicited status notifications | Yes (Phase 4.1) | Not yet with this C# implementation |
+| YNCA write commands, keepalive and continuous background reconnect | No | No |
 
 See [Protocol reference](PROTOCOLS.md) and [Speaker setup](SPEAKER_SETUP.md) for request formats and channel semantics.

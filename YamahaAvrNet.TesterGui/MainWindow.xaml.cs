@@ -11,6 +11,7 @@ using System.Windows.Data;
 using System.Windows.Input;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.PublicApi;
+using YamahaAvrNet.Protocols.Ynca;
 
 namespace YamahaAvrNet.TesterGui
 {
@@ -37,7 +38,10 @@ namespace YamahaAvrNet.TesterGui
                 new TesterCommand("Speaker Setup", "Read speaker levels", "levels", true),
                 new TesterCommand("Speaker Setup", "Read speaker distances", "distances", true),
                 new TesterCommand("Speaker Setup", "Set Front_L level (verified)", "set-level", true, true),
-                new TesterCommand("Speaker Setup", "Set Front_L distance (verified)", "set-distance", true, true)
+                new TesterCommand("Speaker Setup", "Set Front_L distance (verified)", "set-distance", true, true),
+                new TesterCommand("YNCA / TCP", "Read main-zone status (PWR/VOL/MUTE/INP)", "ynca-main"),
+                new TesterCommand("YNCA / TCP", "Read receiver model (SYS/MODELNAME)", "ynca-model"),
+                new TesterCommand("YNCA / TCP", "Read custom YNCA function", "ynca-custom")
             };
             LstCommands.ItemsSource = commands;
             ICollectionView view = CollectionViewSource.GetDefaultView(LstCommands.ItemsSource);
@@ -57,6 +61,13 @@ namespace YamahaAvrNet.TesterGui
                 AppendResult("Enter a valid HTTP port (1-65535).");
                 return;
             }
+            int yncaPort;
+            if (!int.TryParse(TxtYncaPort.Text.Trim(), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out yncaPort) || yncaPort < 1 || yncaPort > 65535)
+            {
+                AppendResult("Enter a valid YNCA TCP port (1-65535).");
+                return;
+            }
             YamahaAvrClient next = null;
             BeginOperation();
             try
@@ -65,16 +76,24 @@ namespace YamahaAvrNet.TesterGui
                 {
                     Host = TxtHost.Text,
                     HttpPort = port,
+                    YncaPort = yncaPort,
                     EnableExtendedControl = true,
                     EnableLegacyXml = true,
-                    EnableYnca = false,
+                    EnableYnca = true,
                     EnableVerifiedSpeakerWrites = ChkEnableVerifiedWrites.IsChecked == true
                 });
                 TxtConnectionStatus.Text = "Connecting...";
                 await next.InitializeAsync();
                 AppendHttp("Discovery completed: GET getDeviceInfo, getFeatures, getFuncStatus");
                 var old = _receiver;
+                if (old != null && old.Ynca != null)
+                {
+                    old.Ynca.MessageReceived -= ReceiverYnca_MessageReceived;
+                    old.Ynca.ConnectionChanged -= ReceiverYnca_ConnectionChanged;
+                }
                 _receiver = next;
+                _receiver.Ynca.MessageReceived += ReceiverYnca_MessageReceived;
+                _receiver.Ynca.ConnectionChanged += ReceiverYnca_ConnectionChanged;
                 next = null;
                 if (old != null)
                     old.Dispose();
@@ -93,6 +112,51 @@ namespace YamahaAvrNet.TesterGui
                     next.Dispose();
                 EndOperation();
             }
+        }
+
+        private async void BtnYncaConnect_Click(object sender, RoutedEventArgs e)
+        {
+            if (_busy || _receiver == null || _receiver.Ynca == null) return;
+            BeginOperation();
+            try
+            {
+                await _receiver.Ynca.ConnectAsync();
+                AppendResult("YNCA TCP connected. Receive notifications appear in the YNCA pane.");
+            }
+            catch (Exception ex) { AppendResult("YNCA connect failed: " + ex.Message); }
+            finally { EndOperation(); }
+        }
+
+        private void BtnYncaDisconnect_Click(object sender, RoutedEventArgs e)
+        {
+            if (_busy || _receiver == null || _receiver.Ynca == null) return;
+            _receiver.Ynca.Disconnect();
+            AppendResult("YNCA session closed. HTTP discovery remains available.");
+            UpdateControls();
+        }
+
+        private void ReceiverYnca_MessageReceived(object sender, YamahaYncaMessageEventArgs e)
+        {
+            string line = e.Message.Raw;
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_receiver == null || !ReferenceEquals(sender, _receiver.Ynca)) return;
+                TxtYncaOutput.AppendText(DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture) +
+                    " < " + line + Environment.NewLine);
+                TxtYncaOutput.ScrollToEnd();
+            }));
+        }
+
+        private void ReceiverYnca_ConnectionChanged(object sender, YamahaYncaConnectionEventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_receiver == null || !ReferenceEquals(sender, _receiver.Ynca)) return;
+                TxtYncaOutput.AppendText((e.IsConnected ? "CONNECTED: " : "DISCONNECTED: ") +
+                    e.Reason + Environment.NewLine);
+                TxtYncaOutput.ScrollToEnd();
+                UpdateControls();
+            }));
         }
 
         private async void BtnRefresh_Click(object sender, RoutedEventArgs e)
@@ -118,6 +182,11 @@ namespace YamahaAvrNet.TesterGui
             try
             {
                 await _receiver.DisconnectAsync();
+                if (_receiver.Ynca != null)
+                {
+                    _receiver.Ynca.MessageReceived -= ReceiverYnca_MessageReceived;
+                    _receiver.Ynca.ConnectionChanged -= ReceiverYnca_ConnectionChanged;
+                }
                 _receiver.Dispose();
                 _receiver = null;
                 TxtConnectionStatus.Text = "Not connected";
@@ -148,6 +217,11 @@ namespace YamahaAvrNet.TesterGui
                     : pattern
                         ? "Use a pattern reported by your receiver. Reads do not alter settings."
                         : "Commands read device information only.";
+            bool yncaCustom = command != null && command.Key == "ynca-custom";
+            LblYncaSubunit.Visibility = yncaCustom ? Visibility.Visible : Visibility.Collapsed;
+            TxtYncaSubunit.Visibility = yncaCustom ? Visibility.Visible : Visibility.Collapsed;
+            LblYncaFunction.Visibility = yncaCustom ? Visibility.Visible : Visibility.Collapsed;
+            TxtYncaFunction.Visibility = yncaCustom ? Visibility.Visible : Visibility.Collapsed;
             UpdateControls();
         }
 
@@ -244,6 +318,16 @@ namespace YamahaAvrNet.TesterGui
                 }
                 switch (command.Key)
                 {
+                    case "ynca-main":
+                        foreach (string function in new[] { "PWR", "VOL", "MUTE", "INP" })
+                            await DisplayYncaGetAsync("MAIN", function);
+                        break;
+                    case "ynca-model":
+                        await DisplayYncaGetAsync("SYS", "MODELNAME");
+                        break;
+                    case "ynca-custom":
+                        await DisplayYncaGetAsync(TxtYncaSubunit.Text.Trim(), TxtYncaFunction.Text.Trim());
+                        break;
                     case "summary":
                         AppendResult(BuildSummary());
                         break;
@@ -296,6 +380,25 @@ namespace YamahaAvrNet.TesterGui
             finally { EndOperation(); }
         }
 
+        private async Task DisplayYncaGetAsync(string subunit, string function)
+        {
+            if (_receiver.Ynca == null)
+            {
+                AppendResult("YNCA is disabled in receiver options.");
+                return;
+            }
+            try
+            {
+                YamahaYncaMessage observed = await _receiver.Ynca.GetAsync(subunit, function);
+                AppendResult("YNCA observed " + observed.Raw +
+                    " (a matching unsolicited update cannot be distinguished from a GET response)");
+            }
+            catch (Exception ex)
+            {
+                AppendResult("YNCA " + subunit + ":" + function + " failed: " + ex.Message);
+            }
+        }
+
         private string BuildSummary()
         {
             var info = _receiver.DeviceInfo;
@@ -308,6 +411,7 @@ namespace YamahaAvrNet.TesterGui
                 "\nSpeaker patterns: " + Show(features == null ? (int?)null : features.SpeakerPatternCount) +
                 "\nActive pattern (Extended): " + Show(status == null ? (int?)null : status.ActiveSpeakerPattern) +
                 "\nConnection state: " + _receiver.ConnectionState +
+                "\nYNCA TCP connected: " + (_receiver.Ynca != null && _receiver.Ynca.IsConnected) +
                 "\n\nSpeaker settings are addressable values, not proof of configured speakers.";
         }
 
@@ -388,6 +492,13 @@ namespace YamahaAvrNet.TesterGui
             BtnSend.IsEnabled = !_busy && _receiver != null && LstCommands.SelectedItem != null;
             TxtHost.IsEnabled = !_busy;
             TxtPort.IsEnabled = !_busy;
+            TxtYncaPort.IsEnabled = !_busy && _receiver == null;
+            BtnYncaConnect.IsEnabled = !_busy && _receiver != null &&
+                _receiver.Ynca != null && !_receiver.Ynca.IsConnected;
+            BtnYncaDisconnect.IsEnabled = !_busy && _receiver != null &&
+                _receiver.Ynca != null && _receiver.Ynca.IsConnected;
+            TxtYncaSubunit.IsEnabled = !_busy;
+            TxtYncaFunction.IsEnabled = !_busy;
             LstCommands.IsEnabled = !_busy;
             TxtPattern.IsEnabled = !_busy;
             TxtWriteValue.IsEnabled = !_busy;
@@ -417,13 +528,20 @@ namespace YamahaAvrNet.TesterGui
         {
             TxtResult.Clear();
             TxtHttpOutput.Clear();
-            TxtYncaOutput.Text = "YNCA will be available in a later phase.";
+            TxtYncaOutput.Clear();
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
             if (_receiver != null)
+            {
+                if (_receiver.Ynca != null)
+                {
+                    _receiver.Ynca.MessageReceived -= ReceiverYnca_MessageReceived;
+                    _receiver.Ynca.ConnectionChanged -= ReceiverYnca_ConnectionChanged;
+                }
                 _receiver.Dispose();
+            }
         }
 
         private sealed class TesterCommand

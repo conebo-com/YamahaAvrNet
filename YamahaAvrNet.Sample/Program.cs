@@ -51,7 +51,7 @@ namespace YamahaAvrNet.Sample
             {
                 Host = host,
                 HttpPort = port.Value,
-                EnableYnca = false,
+                EnableYnca = true,
                 EnableExtendedControl = true,
                 EnableLegacyXml = true
             }))
@@ -74,7 +74,10 @@ namespace YamahaAvrNet.Sample
                         ", scenes=" + Show(zone.SceneCount));
 
                 if (!Confirm("Read legacy XML speaker settings? [y/N]: "))
+                {
+                    await ReadYncaAsync(receiver);
                     return 0;
+                }
 
                 try
                 {
@@ -90,6 +93,7 @@ namespace YamahaAvrNet.Sample
                 if (!count.HasValue || count.Value < 1 || count.Value > 32)
                 {
                     Console.WriteLine("Pattern count not available. No automatic pattern enumeration.");
+                    await ReadYncaAsync(receiver);
                     return 0;
                 }
 
@@ -108,8 +112,60 @@ namespace YamahaAvrNet.Sample
                     }
                     await DisplayPatternAsync(receiver, pattern);
                 }
+                await ReadYncaAsync(receiver);
             }
             return 0;
+        }
+
+        private static async Task ReadYncaAsync(YamahaAvrClient receiver)
+        {
+            Console.WriteLine();
+            if (!Confirm("Read YNCA status over TCP port 50000? [y/N]: ")) return;
+            Console.WriteLine("YNCA only permits one connection on many receivers. Close other YNCA tools first.");
+            try
+            {
+                await receiver.Ynca.ConnectAsync();
+                Console.WriteLine("YNCA connected. Reading Main Zone and model (GET only):");
+                foreach (var request in new[]
+                {
+                    "SYS:MODELNAME", "MAIN:PWR", "MAIN:VOL", "MAIN:MUTE", "MAIN:INP"
+                })
+                {
+                    string[] parts = request.Split(':');
+                    await ShowYncaAsync(receiver, parts[0], parts[1]);
+                }
+                Console.WriteLine();
+                Console.WriteLine("Optional YNCA GET: enter SUBUNIT:FUNCTION (e.g. MAIN:VOL).");
+                Console.WriteLine("Press Enter to close the YNCA connection.");
+                while (true)
+                {
+                    Console.Write("YNCA GET> ");
+                    string input = Console.ReadLine();
+                    if (string.IsNullOrWhiteSpace(input)) break;
+                    string[] parts = input.Trim().Split(':');
+                    if (parts.Length != 2)
+                    {
+                        Console.WriteLine("Use SUBUNIT:FUNCTION. Writes are not supported here.");
+                        continue;
+                    }
+                    await ShowYncaAsync(receiver, parts[0], parts[1]);
+                }
+            }
+            catch (Exception ex) { Console.WriteLine("YNCA connection failed: " + ex.Message); }
+            finally { receiver.Ynca.Disconnect(); }
+        }
+
+        private static async Task ShowYncaAsync(YamahaAvrClient receiver, string subunit, string function)
+        {
+            try
+            {
+                var observed = await receiver.Ynca.GetAsync(subunit, function);
+                Console.WriteLine(observed.Raw + "  (observed; could also be a push update)");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(subunit + ":" + function + " unavailable: " + ex.Message);
+            }
         }
 
         private static async Task DisplayPatternAsync(YamahaAvrClient receiver, int pattern)
