@@ -1,6 +1,6 @@
 # Speaker setup and native Yamaha channel IDs
 
-This reference describes observed **RX-A3060** speaker settings and the intended data semantics of YamahaAvrNet. It does not imply that speaker communication is implemented in the current implementation or supported across every Yamaha model.
+This reference describes observed **RX-A3060** speaker settings and the intended data semantics of YamahaAvrNet. This version implements read-only speaker communication; it does not imply write support or compatibility with other models.
 
 ## Native channels
 
@@ -50,6 +50,8 @@ The working GET targets are the **complete** `Lvl` and `Distance` blocks, not in
 
 A read-only inspection of an RX-A3060 backup found speaker configuration, channel placement, and PEQ data beneath pattern-specific paths. However, GET requests for entire `Config` and `PEQ` nodes were rejected (`RC="2"`). This does not establish whether individual child paths can be read; it certainly does not authorize writing them.
 
-The current public speaker API is a **contract only**. `GetPatternsAsync`, `GetLevelsAsync`, `GetDistancesAsync`, `SetLevelAsync`, and `SetDistanceAsync` throw `NotSupportedException` until their protocol providers and capability checks are implemented. No speaker parameters are changed by the current library or WPF skeleton.
+The speaker API now implements `GetActivePatternAsync`, `GetLevelsAsync`, `GetDistancesAsync`, and `GetPatternsAsync`. The latter requires a valid pattern count from Extended Control discovery, then reads each pattern explicitly; it does not brute-force unknown pattern numbers. Channel information marks addressability and observed readable level/distance fields, while configured/active speaker status and write permissions remain unknown. Both `SetLevelAsync` and `SetDistanceAsync` remain disabled and throw `NotSupportedException` **without sending a command**.
+
+Only previously confirmed aggregate GET paths are used. This code has not yet been verified on a connected RX-A3060; the historical receiver evidence remains separate.
 
 See [Protocol reference](PROTOCOLS.md) and [Device compatibility](COMPATIBILITY.md) for observed commands and the exact evidence boundaries.

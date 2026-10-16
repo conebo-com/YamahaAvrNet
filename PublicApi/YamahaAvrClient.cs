@@ -6,12 +6,13 @@ using YamahaAvrNet.Discovery;
 using YamahaAvrNet.Features.SpeakerSetup;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.Protocols.ExtendedControl;
+using YamahaAvrNet.Protocols.LegacyXml;
 
 namespace YamahaAvrNet.PublicApi
 {
     /// <summary>
-    /// Independent Yamaha receiver facade. Currently supports read-only Extended
-    /// Control discovery; YNCA, legacy XML and speaker writes are not yet available.
+    /// Independent Yamaha receiver facade. Supports Extended Control discovery
+    /// and read-only legacy HTTP/XML speaker parameters; no write commands.
     /// </summary>
     public sealed class YamahaAvrClient : IDisposable
     {
@@ -20,9 +21,12 @@ namespace YamahaAvrNet.PublicApi
 
         private readonly YamahaAvrOptions _options;
         private readonly YamahaExtendedHttpClient _extendedHttp;
+        private readonly YamahaLegacyXmlHttpClient _legacyXml;
         private readonly SemaphoreSlim _lifecycleGate = new SemaphoreSlim(1, 1);
         private readonly object _stateSync = new object();
         private YamahaDeviceCapabilities _capabilities;
+        private readonly Dictionary<string, DateTimeOffset> _speakerVerifiedReads =
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         private IReadOnlyList<YamahaZoneInfo> _zones = EmptyZones;
         private YamahaConnectionState _connectionState = YamahaConnectionState.Disconnected;
         private YamahaExtendedDeviceInfo _deviceInfo;
@@ -40,7 +44,11 @@ namespace YamahaAvrNet.PublicApi
             _capabilities = new YamahaDeviceCapabilities(new YamahaCapability[0]);
             _extendedHttp = _options.EnableExtendedControl
                 ? new YamahaExtendedHttpClient(_options) : null;
-            Speakers = new YamahaSpeakerSetupController(EnsureNotDisposed);
+            _legacyXml = _options.EnableLegacyXml
+                ? new YamahaLegacyXmlHttpClient(_options) : null;
+            Speakers = new YamahaSpeakerSetupController(EnsureNotDisposed, _legacyXml,
+                GetReportedSpeakerPatternCount, GetExtendedActivePatternAsync,
+                RecordSpeakerRead);
         }
 
         public string Host { get { return _options.Host; } }
@@ -125,7 +133,7 @@ namespace YamahaAvrNet.PublicApi
                         UpdateIdentity(info);
                         _connectionState = YamahaConnectionState.Connected;
                         if (_features != null)
-                            _capabilities = YamahaExtendedCapabilityMapper.Build(info, _features, _functionStatus);
+                            _capabilities = BuildCapabilities(info, _features, _functionStatus);
                     }
                 }
                 catch
@@ -187,7 +195,7 @@ namespace YamahaAvrNet.PublicApi
                             _lastUpdatedUtc = status.ObservedUtc;
                             _stale = false;
                             _connectionState = YamahaConnectionState.Connected;
-                            _capabilities = YamahaExtendedCapabilityMapper.Build(
+                            _capabilities = BuildCapabilities(
                                 _deviceInfo, _features, status);
                         }
                     }
@@ -215,14 +223,14 @@ namespace YamahaAvrNet.PublicApi
                 _features = features;
                 _zones = zones.AsReadOnly();
                 _lastUpdatedUtc = features.ObservedUtc;
-                _capabilities = YamahaExtendedCapabilityMapper.Build(info, features, null);
+                _capabilities = BuildCapabilities(info, features, null);
             }
             var status = await _extendedHttp.GetFuncStatusAsync(ct).ConfigureAwait(false);
             lock (_stateSync)
             {
                 _functionStatus = status;
                 _lastUpdatedUtc = status.ObservedUtc;
-                _capabilities = YamahaExtendedCapabilityMapper.Build(info, features, status);
+                _capabilities = BuildCapabilities(info, features, status);
                 _stale = false;
                 _connectionState = YamahaConnectionState.Connected;
             }
@@ -254,6 +262,7 @@ namespace YamahaAvrNet.PublicApi
                  !string.Equals(_deviceInfo.ApiVersion, info.ApiVersion, StringComparison.Ordinal)))
             {
                 _features = null;
+                _speakerVerifiedReads.Clear();
                 _functionStatus = null;
                 _zones = EmptyZones;
                 _capabilities = new YamahaDeviceCapabilities(new YamahaCapability[0]);
@@ -278,6 +287,45 @@ namespace YamahaAvrNet.PublicApi
             lock (_stateSync) _connectionState = value;
         }
 
+        /// <summary>Retains successful instance-specific XML reads across Extended refreshes.</summary>
+        private YamahaDeviceCapabilities BuildCapabilities(YamahaExtendedDeviceInfo device,
+            YamahaExtendedFeatures features, YamahaExtendedFunctionStatus status)
+        {
+            var known = new List<YamahaCapability>(
+                YamahaExtendedCapabilityMapper.Build(device, features, status).All);
+            foreach (var pair in _speakerVerifiedReads)
+                known.Add(new YamahaCapability(pair.Key,
+                    YamahaCapabilityStatus.ReadVerified, YamahaEvidenceSource.ReadProbe,
+                    canRead: true, protocol: "LegacyXml",
+                    model: device == null ? null : device.ModelName,
+                    firmware: device == null ? null : device.SystemVersion,
+                    lastVerifiedUtc: pair.Value));
+            return new YamahaDeviceCapabilities(known);
+        }
+
+        private void RecordSpeakerRead(string featureId, DateTimeOffset observedUtc)
+        {
+            lock (_stateSync)
+            {
+                _speakerVerifiedReads[featureId] = observedUtc;
+                _capabilities = BuildCapabilities(_deviceInfo, _features, _functionStatus);
+            }
+        }
+
+        private int? GetReportedSpeakerPatternCount()
+        {
+            lock (_stateSync)
+                return _features == null ? (int?)null : _features.SpeakerPatternCount;
+        }
+
+        private async Task<int?> GetExtendedActivePatternAsync(CancellationToken ct)
+        {
+            if (_extendedHttp == null)
+                throw new NotSupportedException("Extended Control is disabled.");
+            var status = await _extendedHttp.GetFuncStatusAsync(ct).ConfigureAwait(false);
+            return status.ActiveSpeakerPattern;
+        }
+
         private void EnsureExtendedAvailable()
         {
             EnsureNotDisposed();
@@ -299,6 +347,8 @@ namespace YamahaAvrNet.PublicApi
             _disposed = true;
             if (_extendedHttp != null)
                 _extendedHttp.Dispose();
+            if (_legacyXml != null)
+                _legacyXml.Dispose();
             lock (_stateSync) _connectionState = YamahaConnectionState.Disposed;
         }
     }

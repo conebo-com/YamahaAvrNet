@@ -2,7 +2,7 @@
 
 This document records publicly useful protocol behavior and historical receiver observations, **not an implementation-completeness claim**. The reference device is a **Yamaha RX-A3060** running firmware **2.86** with Extended Control API **2.08**. Availability and limits can differ by model, firmware, and current receiver state.
 
-YamahaAvrNet is designed to use three protocol families together when available. **The implementation currently supports the three read-only Extended Control GET endpoints.** YNCA and legacy XML are documented references but are not implemented as transports yet.
+YamahaAvrNet is designed to use three protocol families together when available. **The implementation supports three read-only Extended Control GET endpoints and legacy XML speaker aggregate GETs.** YNCA remains a documented reference and is not implemented yet.
 
 ## 1. YNCA (TCP / optionally serial)
 
@@ -56,6 +56,16 @@ Endpoint:
 POST http://<receiver>/YamahaRemoteControl/ctrl
 Content-Type: text/xml; charset=utf-8
 ```
+
+### Implemented legacy XML reads
+
+- `System/Speaker_Preout/Pattern_Sel` (active speaker pattern)
+- `System/Speaker_Preout/Pattern_N/Lvl` (all native level values)
+- `System/Speaker_Preout/Pattern_N/Distance` (the `Meter` aggregate)
+
+The library builds only these known GET requests using `XDocument`; it **does not generate a standalone per-channel GET**. A reusable `HttpClient` sends `POST` to `/YamahaRemoteControl/ctrl` with `Content-Type: text/xml; charset=utf-8`. HTTP requests are serialized, bounded to 2 MiB and subject to timeout/cancellation. DTD processing and external entity resolution are disabled. Yamaha `RC` must be `0` before any XML values are parsed. Speaker channel names are kept verbatim, and their per-channel `Val`, `Exp`, and `Unit` are converted to `decimal` values using invariant culture. The parser selects `Distance/Meter`; missing or unexpected units produce explicit errors.
+
+A successful read contributes `ReadVerified` evidence for that particular device/pattern in the client's capability snapshot. **Write support remains unknown**, and no live PUT methods are enabled.
 
 Requests use `<YAMAHA_AV cmd="GET">` or `<YAMAHA_AV cmd="PUT">`. Evaluate the **HTTP status** and Yamaha's response attribute **`RC` independently**. On the reference device, `RC="0"` was observed for successful requests and `RC="2"` for certain rejected aggregate GET targets; these observations are **not** a universal return-code dictionary.
 

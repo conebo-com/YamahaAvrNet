@@ -2,14 +2,21 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Input;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.PublicApi;
 
 namespace YamahaAvrNet.TesterGui
 {
-    /// <summary>Manual UI only. Receiver networking remains in YamahaAvrNet.</summary>
+    /// <summary>
+    /// Manual command browser following the DenonMarantz tester layout.
+    /// All receiver communication is performed by the YamahaAvrNet library.
+    /// </summary>
     public partial class MainWindow : Window
     {
         private YamahaAvrClient _receiver;
@@ -18,161 +25,266 @@ namespace YamahaAvrNet.TesterGui
         public MainWindow()
         {
             InitializeComponent();
+            var commands = new List<TesterCommand>
+            {
+                new TesterCommand("Overview", "Receiver summary", "summary"),
+                new TesterCommand("Overview", "Refresh function status", "refresh"),
+                new TesterCommand("Overview", "Available zones and sources", "zones"),
+                new TesterCommand("Overview", "Capabilities and evidence", "capabilities"),
+                new TesterCommand("Speaker Setup", "Read active speaker pattern", "active"),
+                new TesterCommand("Speaker Setup", "Read all advertised patterns", "patterns"),
+                new TesterCommand("Speaker Setup", "Read speaker levels", "levels", true),
+                new TesterCommand("Speaker Setup", "Read speaker distances", "distances", true)
+            };
+            LstCommands.ItemsSource = commands;
+            ICollectionView view = CollectionViewSource.GetDefaultView(LstCommands.ItemsSource);
+            view.GroupDescriptions.Add(new PropertyGroupDescription("Group"));
+            LstCommands.SelectedIndex = 0;
+            UpdateControls();
         }
 
-        private async void ConnectButton_Click(object sender, RoutedEventArgs e)
+        private async void BtnConnect_Click(object sender, RoutedEventArgs e)
         {
             if (_busy)
                 return;
-
             int port;
-            if (!int.TryParse(PortTextBox.Text, NumberStyles.None,
-                CultureInfo.InvariantCulture, out port) || port < 1 || port > 65535)
+            if (!int.TryParse(TxtPort.Text.Trim(), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out port) || port < 1 || port > 65535)
             {
-                MessageText.Text = "Enter a valid HTTP port (1-65535).";
+                AppendResult("Enter a valid HTTP port (1-65535).");
                 return;
             }
-
             YamahaAvrClient next = null;
-            SetBusy(true);
+            BeginOperation();
             try
             {
                 next = new YamahaAvrClient(new YamahaAvrOptions
                 {
-                    Host = HostTextBox.Text,
+                    Host = TxtHost.Text,
                     HttpPort = port,
                     EnableExtendedControl = true,
-                    EnableLegacyXml = false,
+                    EnableLegacyXml = true,
                     EnableYnca = false
                 });
-                ConnectionStatusText.Text = "Discovering receiver...";
-                MessageText.Text = "Reading device info, advertised features and current function status.";
+                TxtConnectionStatus.Text = "Connecting...";
                 await next.InitializeAsync();
-
-                var previous = _receiver;
+                AppendHttp("Discovery completed: GET getDeviceInfo, getFeatures, getFuncStatus");
+                var old = _receiver;
                 _receiver = next;
                 next = null;
-                if (previous != null)
-                    previous.Dispose();
-
-                ShowSnapshot();
-                MessageText.Text = "Discovery completed using read-only requests.";
+                if (old != null)
+                    old.Dispose();
+                TxtConnectionStatus.Text = "Connected: " + Show(_receiver.Model);
+                AppendResult(BuildSummary());
             }
             catch (Exception ex)
             {
-                MessageText.Text = "Discovery failed: " + ex.Message;
-                ConnectionStatusText.Text = _receiver == null
-                    ? "Disconnected" : _receiver.ConnectionState.ToString();
+                AppendResult("Connection failed: " + ex.Message);
+                TxtConnectionStatus.Text = _receiver == null ? "Not connected"
+                    : "Connected: " + Show(_receiver.Model);
             }
             finally
             {
                 if (next != null)
                     next.Dispose();
-                SetBusy(false);
+                EndOperation();
             }
         }
 
-        private async void RefreshButton_Click(object sender, RoutedEventArgs e)
+        private async void BtnRefresh_Click(object sender, RoutedEventArgs e)
         {
             if (_busy || _receiver == null)
                 return;
-            SetBusy(true);
+            BeginOperation();
             try
             {
-                ConnectionStatusText.Text = "Refreshing status...";
+                AppendHttp("GET /YamahaExtendedControl/v1/system/getFuncStatus");
                 await _receiver.RefreshAsync();
-                ShowSnapshot();
-                MessageText.Text = "Current system function status refreshed.";
+                AppendResult(BuildSummary());
             }
-            catch (Exception ex)
-            {
-                ConnectionStatusText.Text = _receiver.ConnectionState.ToString();
-                MessageText.Text = "Refresh failed: " + ex.Message;
-            }
-            finally { SetBusy(false); }
+            catch (Exception ex) { AppendResult("Refresh failed: " + ex.Message); }
+            finally { EndOperation(); }
         }
 
-        private async void DisconnectButton_Click(object sender, RoutedEventArgs e)
+        private async void BtnDisconnect_Click(object sender, RoutedEventArgs e)
         {
             if (_busy || _receiver == null)
                 return;
-            SetBusy(true);
+            BeginOperation();
             try
             {
                 await _receiver.DisconnectAsync();
                 _receiver.Dispose();
                 _receiver = null;
-                ConnectionStatusText.Text = "Disconnected";
-                MessageText.Text = "The previous device snapshot is no longer live.";
+                TxtConnectionStatus.Text = "Not connected";
+                AppendResult("Disconnected. Previously displayed values are not live.");
             }
-            catch (Exception ex)
-            {
-                MessageText.Text = "Disconnect failed: " + ex.Message;
-            }
-            finally { SetBusy(false); }
+            catch (Exception ex) { AppendResult("Disconnect failed: " + ex.Message); }
+            finally { EndOperation(); }
         }
 
-        private void ShowSnapshot()
+        private void LstCommands_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_receiver == null)
-                return;
+            var command = LstCommands.SelectedItem as TesterCommand;
+            bool pattern = command != null && command.RequiresPattern;
+            if (LblPattern != null)
+                LblPattern.Visibility = pattern ? Visibility.Visible : Visibility.Collapsed;
+            if (TxtPattern != null)
+                TxtPattern.Visibility = pattern ? Visibility.Visible : Visibility.Collapsed;
+            if (TxtCommandHint != null)
+                TxtCommandHint.Text = pattern
+                    ? "Use a pattern reported by your receiver. No values are changed."
+                    : "Commands read device information only.";
+            UpdateControls();
+        }
 
+        private async void LstCommands_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            await ExecuteSelectedAsync();
+        }
+
+        private async void BtnSend_Click(object sender, RoutedEventArgs e)
+        {
+            await ExecuteSelectedAsync();
+        }
+
+        private async Task ExecuteSelectedAsync()
+        {
+            if (_busy || _receiver == null)
+                return;
+            TesterCommand command = LstCommands.SelectedItem as TesterCommand;
+            if (command == null)
+                return;
+            int pattern = 0;
+            if (command.RequiresPattern)
+            {
+                if (!int.TryParse(TxtPattern.Text, NumberStyles.None,
+                        CultureInfo.InvariantCulture, out pattern) || pattern < 1 || pattern > 99)
+                {
+                    AppendResult("Enter a valid speaker pattern number (1-99).");
+                    return;
+                }
+                int? reported = _receiver.DeviceFeatures == null ? (int?)null
+                    : _receiver.DeviceFeatures.SpeakerPatternCount;
+                if (reported.HasValue && pattern > reported.Value)
+                {
+                    AppendResult("Pattern " + pattern + " exceeds the device-reported count.");
+                    return;
+                }
+            }
+            BeginOperation();
+            try
+            {
+                switch (command.Key)
+                {
+                    case "summary":
+                        AppendResult(BuildSummary());
+                        break;
+                    case "refresh":
+                        AppendHttp("GET /YamahaExtendedControl/v1/system/getFuncStatus");
+                        await _receiver.RefreshAsync();
+                        AppendResult(BuildSummary());
+                        break;
+                    case "zones":
+                        AppendResult(BuildZones());
+                        break;
+                    case "capabilities":
+                        AppendResult(BuildCapabilities());
+                        break;
+                    case "active":
+                        AppendHttp("POST /YamahaRemoteControl/ctrl (GET Pattern_Sel)");
+                        int? active = await _receiver.Speakers.GetActivePatternAsync();
+                        AppendResult("Active speaker pattern (Legacy XML): " + Show(active));
+                        break;
+                    case "patterns":
+                        AppendHttp("POST /YamahaRemoteControl/ctrl (GET Pattern_Sel, Lvl/Distance for each pattern)");
+                        var patterns = await _receiver.Speakers.GetPatternsAsync();
+                        var lines = new StringBuilder();
+                        foreach (var item in patterns)
+                        {
+                            lines.AppendLine("Pattern " + item.Number +
+                                " (active: " + (item.IsActive.HasValue
+                                ? item.IsActive.Value.ToString() : "unknown") + ")");
+                            foreach (var channel in item.Channels)
+                                lines.AppendLine("  " + channel.NativeId +
+                                    " | level: " + Permission(channel.CanReadLevel) +
+                                    " | distance: " + Permission(channel.CanReadDistance) +
+                                    " | configured: unknown");
+                        }
+                        AppendResult(lines.ToString());
+                        break;
+                    case "levels":
+                        AppendHttp("POST /YamahaRemoteControl/ctrl (GET Pattern_" + pattern + "/Lvl)");
+                        AppendResult(FormatChannels("Levels", pattern,
+                            await _receiver.Speakers.GetLevelsAsync(pattern)));
+                        break;
+                    case "distances":
+                        AppendHttp("POST /YamahaRemoteControl/ctrl (GET Pattern_" + pattern + "/Distance)");
+                        AppendResult(FormatChannels("Distances", pattern,
+                            await _receiver.Speakers.GetDistancesAsync(pattern)));
+                        break;
+                }
+            }
+            catch (Exception ex) { AppendResult("Operation failed: " + ex.Message); }
+            finally { EndOperation(); }
+        }
+
+        private string BuildSummary()
+        {
             var info = _receiver.DeviceInfo;
             var features = _receiver.DeviceFeatures;
             var status = _receiver.FunctionStatus;
+            return "Receiver: " + Show(info == null ? null : info.ModelName) +
+                "\nFirmware: " + Show(info == null ? null : info.SystemVersion) +
+                "\nExtended Control API: " + Show(info == null ? null : info.ApiVersion) +
+                "\nReported zones: " + Show(features == null ? (int?)null : features.ReportedZoneCount) +
+                "\nSpeaker patterns: " + Show(features == null ? (int?)null : features.SpeakerPatternCount) +
+                "\nActive pattern (Extended): " + Show(status == null ? (int?)null : status.ActiveSpeakerPattern) +
+                "\nConnection state: " + _receiver.ConnectionState +
+                "\n\nSpeaker settings are addressable values, not proof of configured speakers.";
+        }
 
-            ConnectionStatusText.Text = _receiver.ConnectionState.ToString();
-            ModelText.Text = info == null || string.IsNullOrWhiteSpace(info.ModelName)
-                ? "Model not reported" : info.ModelName;
-            VersionText.Text = "Firmware: " + Show(info == null ? null : info.SystemVersion) +
-                " | Extended Control API: " + Show(info == null ? null : info.ApiVersion);
-            PatternText.Text = "Speaker patterns: " +
-                (features == null ? "unknown" : Show(features.SpeakerPatternCount)) +
-                " | Active pattern: " + (status == null ? "unknown" : Show(status.ActiveSpeakerPattern));
-
-            var zoneRows = new List<ZoneDisplayRow>();
-            if (features != null)
+        private string BuildZones()
+        {
+            var features = _receiver.DeviceFeatures;
+            if (features == null)
+                return "Discover receiver features first.";
+            var sb = new StringBuilder();
+            foreach (var zone in features.Zones)
             {
-                foreach (var zone in features.Zones)
-                {
-                    YamahaExtendedNumericRange volume;
-                    zone.Ranges.TryGetValue("actual_volume_db", out volume);
-                    zoneRows.Add(new ZoneDisplayRow
-                    {
-                        NativeId = zone.NativeId,
-                        InputCount = zone.Inputs.Count,
-                        SoundProgramCount = zone.SoundPrograms.Count,
-                        SceneCount = Show(zone.SceneCount),
-                        VolumeRangeDb = FormatRange(volume)
-                    });
-                }
+                sb.AppendLine(zone.NativeId + " | scenes: " + Show(zone.SceneCount));
+                sb.AppendLine("  Inputs: " + string.Join(", ", zone.Inputs));
+                sb.AppendLine("  Sound programs: " + string.Join(", ", zone.SoundPrograms));
             }
-            ZonesGrid.ItemsSource = zoneRows;
-            CapabilitiesGrid.ItemsSource = _receiver.Capabilities
-                .OrderBy(x => x.FeatureId)
-                .Select(x => new CapabilityDisplayRow
-                {
-                    FeatureId = x.FeatureId,
-                    Status = x.Status.ToString(),
-                    CanRead = PermissionText(x.CanRead),
-                    CanWrite = PermissionText(x.CanWrite),
-                    Evidence = x.Evidence.ToString()
-                }).ToArray();
+            return sb.ToString();
+        }
 
-            OverviewDetailsText.Text = features == null ? "No feature data available." :
-                "Reported zones: " + Show(features.ReportedZoneCount) +
-                "\nZones in response: " + features.Zones.Count +
-                "\nSystem input definitions: " + features.SystemInputs.Count +
-                "\nSystem functions: " + features.SystemFunctions.Count +
-                "\nTuner presets: " + Show(features.TunerPresetCount) +
-                "\nNETUSB presets: " + Show(features.NetUsbPresetCount) +
-                "\n\nVolume scale (numeric) and actual_volume_db (dB) are separate parameters.";
+        private string BuildCapabilities()
+        {
+            var sb = new StringBuilder();
+            foreach (var cap in _receiver.Capabilities.OrderBy(x => x.FeatureId))
+                sb.AppendLine(cap.FeatureId + " | " + cap.Status + " | read " +
+                    Permission(cap.CanRead) + " | write " + Permission(cap.CanWrite) +
+                    " | " + cap.Evidence);
+            return sb.ToString();
+        }
 
-            DiagnosticsText.Text = status == null ? "No status available." :
-                "GET /YamahaExtendedControl/v1/system/getFuncStatus\n" +
-                "Received at (UTC): " + status.ObservedUtc.ToString("O", CultureInfo.InvariantCulture) +
-                "\nReturned keys: " + string.Join(", ", status.Values.Keys.OrderBy(x => x)) +
-                "\n\nValues and raw network identifiers are intentionally not included in this view.";
+        private static string FormatChannels(string kind, int pattern,
+            IReadOnlyDictionary<string, YamahaSpeakerValue> values)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine(kind + " for Pattern " + pattern + " (" + values.Count + " channels)");
+            foreach (var kv in values.OrderBy(x => x.Key, StringComparer.Ordinal))
+                sb.AppendLine(kv.Key.PadRight(24) + " " +
+                    kv.Value.Value.ToString(CultureInfo.InvariantCulture) + " " + kv.Value.Unit +
+                    "  [Val=" + kv.Value.RawValue.ToString(CultureInfo.InvariantCulture) +
+                    ", Exp=" + kv.Value.Exponent + "]");
+            return sb.ToString();
+        }
+
+        private static string Permission(bool? permission)
+        {
+            return !permission.HasValue ? "Unknown" : permission.Value ? "Yes" : "No";
         }
 
         private static string Show(string value)
@@ -185,30 +297,58 @@ namespace YamahaAvrNet.TesterGui
             return value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : "unknown";
         }
 
-        private static string PermissionText(bool? allowed)
+        private void BeginOperation()
         {
-            return !allowed.HasValue ? "Unknown" : allowed.Value ? "Yes" : "No";
+            if (ChkClearBeforeOperation.IsChecked == true)
+                ClearOutputs();
+            _busy = true;
+            UpdateControls();
         }
 
-        private static string FormatRange(YamahaExtendedNumericRange range)
+        private void EndOperation()
         {
-            if (range == null || !range.Minimum.HasValue || !range.Maximum.HasValue)
-                return "unknown";
-            string s = range.Minimum.Value.ToString(CultureInfo.InvariantCulture) + " to " +
-                range.Maximum.Value.ToString(CultureInfo.InvariantCulture);
-            if (range.Step.HasValue)
-                s += " (step " + range.Step.Value.ToString(CultureInfo.InvariantCulture) + ")";
-            return s;
+            _busy = false;
+            UpdateControls();
         }
 
-        private void SetBusy(bool busy)
+        private void UpdateControls()
         {
-            _busy = busy;
-            ConnectButton.IsEnabled = !busy;
-            RefreshButton.IsEnabled = !busy && _receiver != null;
-            DisconnectButton.IsEnabled = !busy && _receiver != null;
-            HostTextBox.IsEnabled = !busy;
-            PortTextBox.IsEnabled = !busy;
+            if (BtnConnect == null || BtnSend == null)
+                return;
+            BtnConnect.IsEnabled = !_busy;
+            BtnRefresh.IsEnabled = !_busy && _receiver != null;
+            BtnDisconnect.IsEnabled = !_busy && _receiver != null;
+            BtnSend.IsEnabled = !_busy && _receiver != null && LstCommands.SelectedItem != null;
+            TxtHost.IsEnabled = !_busy;
+            TxtPort.IsEnabled = !_busy;
+            LstCommands.IsEnabled = !_busy;
+            TxtPattern.IsEnabled = !_busy;
+        }
+
+        private void AppendResult(string message)
+        {
+            TxtResult.AppendText(message + Environment.NewLine + Environment.NewLine);
+            TxtResult.ScrollToEnd();
+        }
+
+        private void AppendHttp(string message)
+        {
+            // These are operation summaries, not captured raw network traffic.
+            TxtHttpOutput.AppendText(DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture) +
+                " " + message + Environment.NewLine);
+            TxtHttpOutput.ScrollToEnd();
+        }
+
+        private void BtnClear_Click(object sender, RoutedEventArgs e)
+        {
+            ClearOutputs();
+        }
+
+        private void ClearOutputs()
+        {
+            TxtResult.Clear();
+            TxtHttpOutput.Clear();
+            TxtYncaOutput.Text = "YNCA will be available in a later phase.";
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -216,23 +356,21 @@ namespace YamahaAvrNet.TesterGui
             if (_receiver != null)
                 _receiver.Dispose();
         }
-    }
 
-    public sealed class CapabilityDisplayRow
-    {
-        public string FeatureId { get; set; }
-        public string Status { get; set; }
-        public string CanRead { get; set; }
-        public string CanWrite { get; set; }
-        public string Evidence { get; set; }
-    }
+        private sealed class TesterCommand
+        {
+            internal TesterCommand(string group, string name, string key, bool requiresPattern = false)
+            {
+                Group = group;
+                Name = name;
+                Key = key;
+                RequiresPattern = requiresPattern;
+            }
 
-    public sealed class ZoneDisplayRow
-    {
-        public string NativeId { get; set; }
-        public int InputCount { get; set; }
-        public int SoundProgramCount { get; set; }
-        public string SceneCount { get; set; }
-        public string VolumeRangeDb { get; set; }
+            public string Group { get; private set; }
+            public string Name { get; private set; }
+            public string Key { get; private set; }
+            public bool RequiresPattern { get; private set; }
+        }
     }
 }

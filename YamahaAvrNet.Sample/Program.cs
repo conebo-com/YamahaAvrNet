@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Threading.Tasks;
+using YamahaAvrNet.Models;
 using YamahaAvrNet.PublicApi;
 
 namespace YamahaAvrNet.Sample
@@ -9,16 +12,15 @@ namespace YamahaAvrNet.Sample
     {
         private static int Main()
         {
-            int exitCode;
+            int result;
             try
             {
-                exitCode = RunAsync().GetAwaiter().GetResult();
+                result = RunAsync().GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
-                Console.Error.WriteLine();
-                Console.Error.WriteLine("Receiver discovery failed: " + ex.Message);
-                exitCode = 1;
+                Console.Error.WriteLine("Receiver operation failed: " + ex.Message);
+                result = 1;
             }
 
             if (!Console.IsInputRedirected)
@@ -27,59 +29,130 @@ namespace YamahaAvrNet.Sample
                 Console.Write("Press Enter to exit...");
                 Console.ReadLine();
             }
-
-            return exitCode;
+            return result;
         }
 
         private static async Task<int> RunAsync()
         {
-            Console.WriteLine("YamahaAvrNet - read-only Extended Control discovery");
-            Console.WriteLine("No receiver settings will be changed.");
+            Console.WriteLine("YamahaAvrNet - receiver information and speaker settings");
+            Console.WriteLine("Read-only: no receiver settings will be changed.");
             Console.WriteLine();
 
             string host = ReadHost();
             if (host == null)
                 return 0;
-
             int? port = ReadHttpPort();
             if (!port.HasValue)
                 return 0;
 
             Console.WriteLine();
             Console.WriteLine("Connecting to " + host + ":" + port.Value + "...");
-            Console.WriteLine();
-
             using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
             {
                 Host = host,
                 HttpPort = port.Value,
                 EnableYnca = false,
-                EnableLegacyXml = false,
-                EnableExtendedControl = true
+                EnableExtendedControl = true,
+                EnableLegacyXml = true
             }))
             {
                 await receiver.InitializeAsync();
-
                 var info = receiver.DeviceInfo;
                 var features = receiver.DeviceFeatures;
                 var status = receiver.FunctionStatus;
 
-                Console.WriteLine("Model: " + (info.ModelName ?? "unknown"));
-                Console.WriteLine("Firmware: " + (info.SystemVersion ?? "unknown"));
-                Console.WriteLine("Extended Control API: " + (info.ApiVersion ?? "unknown"));
-                Console.WriteLine("Reported zones: " + Format(features.ReportedZoneCount));
-                Console.WriteLine("Reported speaker patterns: " + Format(features.SpeakerPatternCount));
-                Console.WriteLine("Active speaker pattern: " + Format(status.ActiveSpeakerPattern));
+                Console.WriteLine("Model: " + Show(info.ModelName));
+                Console.WriteLine("Firmware: " + Show(info.SystemVersion));
+                Console.WriteLine("Extended Control API: " + Show(info.ApiVersion));
+                Console.WriteLine("Reported zones: " + Show(features.ReportedZoneCount));
+                Console.WriteLine("Reported speaker patterns: " + Show(features.SpeakerPatternCount));
+                Console.WriteLine("Active speaker pattern (Extended): " + Show(status.ActiveSpeakerPattern));
 
                 foreach (var zone in features.Zones)
-                {
                     Console.WriteLine("Zone " + zone.NativeId + ": inputs=" + zone.Inputs.Count +
                         ", sound programs=" + zone.SoundPrograms.Count +
-                        ", scenes=" + Format(zone.SceneCount));
+                        ", scenes=" + Show(zone.SceneCount));
+
+                if (!Confirm("Read legacy XML speaker settings? [y/N]: "))
+                    return 0;
+
+                try
+                {
+                    int? active = await receiver.Speakers.GetActivePatternAsync();
+                    Console.WriteLine("Active speaker pattern (Legacy XML): " + Show(active));
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Active pattern read failed: " + ex.Message);
+                }
+
+                int? count = features.SpeakerPatternCount;
+                if (!count.HasValue || count.Value < 1 || count.Value > 32)
+                {
+                    Console.WriteLine("Pattern count not available. No automatic pattern enumeration.");
+                    return 0;
+                }
+
+                while (true)
+                {
+                    Console.Write("Pattern to read [1-" + count.Value + "] (Enter to finish): ");
+                    string selection = Console.ReadLine();
+                    if (string.IsNullOrWhiteSpace(selection))
+                        break;
+                    int pattern;
+                    if (!int.TryParse(selection.Trim(), NumberStyles.None,
+                        CultureInfo.InvariantCulture, out pattern) || pattern < 1 || pattern > count.Value)
+                    {
+                        Console.WriteLine("Enter a valid pattern number.");
+                        continue;
+                    }
+                    await DisplayPatternAsync(receiver, pattern);
                 }
             }
-
             return 0;
+        }
+
+        private static async Task DisplayPatternAsync(YamahaAvrClient receiver, int pattern)
+        {
+            try
+            {
+                var levels = await receiver.Speakers.GetLevelsAsync(pattern);
+                var distances = await receiver.Speakers.GetDistancesAsync(pattern);
+                var channelIds = new SortedSet<string>(levels.Keys, StringComparer.Ordinal);
+                channelIds.UnionWith(distances.Keys);
+                Console.WriteLine();
+                Console.WriteLine("Pattern " + pattern + " - native speaker channels");
+                Console.WriteLine("{0,-25} {1,14} {2,14}", "Channel", "Level", "Distance");
+                foreach (string id in channelIds)
+                {
+                    YamahaSpeakerValue level;
+                    YamahaSpeakerValue distance;
+                    string levelText = levels.TryGetValue(id, out level)
+                        ? FormatValue(level) : "n/a";
+                    string distanceText = distances.TryGetValue(id, out distance)
+                        ? FormatValue(distance) : "n/a";
+                    Console.WriteLine("{0,-25} {1,14} {2,14}", id, levelText, distanceText);
+                }
+                Console.WriteLine("Channel presence does not imply that a speaker is configured.");
+                Console.WriteLine();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Pattern " + pattern + " could not be read: " + ex.Message);
+            }
+        }
+
+        private static string FormatValue(YamahaSpeakerValue value)
+        {
+            return value.Value.ToString(CultureInfo.InvariantCulture) + " " + value.Unit;
+        }
+
+        private static bool Confirm(string prompt)
+        {
+            Console.Write(prompt);
+            string input = Console.ReadLine();
+            return string.Equals(input == null ? null : input.Trim(), "y",
+                StringComparison.OrdinalIgnoreCase);
         }
 
         private static string ReadHost()
@@ -88,14 +161,12 @@ namespace YamahaAvrNet.Sample
             {
                 Console.Write("Receiver IP address or hostname (Enter to quit): ");
                 string input = Console.ReadLine();
-                if (input == null || string.IsNullOrWhiteSpace(input))
+                if (string.IsNullOrWhiteSpace(input))
                     return null;
-
                 string host = input.Trim();
                 if (Uri.CheckHostName(host) != UriHostNameType.Unknown)
                     return host;
-
-                Console.WriteLine("Invalid IP address or hostname. Enter a host, not a URL.");
+                Console.WriteLine("Enter an IP address or hostname, not a URL.");
             }
         }
 
@@ -107,20 +178,22 @@ namespace YamahaAvrNet.Sample
                 string input = Console.ReadLine();
                 if (input == null)
                     return null;
-
                 if (string.IsNullOrWhiteSpace(input))
                     return 80;
-
                 int port;
                 if (int.TryParse(input.Trim(), NumberStyles.None,
                     CultureInfo.InvariantCulture, out port) && port >= 1 && port <= 65535)
                     return port;
-
-                Console.WriteLine("Invalid HTTP port. Enter a number from 1 to 65535.");
+                Console.WriteLine("Enter an HTTP port from 1 to 65535.");
             }
         }
 
-        private static string Format(int? value)
+        private static string Show(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) ? "unknown" : value;
+        }
+
+        private static string Show(int? value)
         {
             return value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : "unknown";
         }

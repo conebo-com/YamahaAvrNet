@@ -2,7 +2,7 @@
 
 This document distinguishes **observed receiver behavior** from **features currently implemented by YamahaAvrNet**. Historical observations were made on a **Yamaha RX-A3060, firmware 2.86, Extended Control API 2.08**. They must not be generalized to other models or firmware versions.
 
-**Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker GET/PUT and YNCA are **not implemented**. This build has not yet been verified against a physical receiver; historical hardware evidence below is separate from the implementation status.
+**Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker aggregate GETs are implemented in read-only mode; legacy PUT and YNCA remain **not implemented**. This build has not yet been verified against a physical receiver; historical hardware evidence below is separate from the implementation status.
 
 ## Capability terminology
 
@@ -45,7 +45,9 @@ A rejected request is not proof that an entire feature is unsupported. For examp
 | Extended Control feature lists, zones, scene counts and ranges (GET) | Yes | Not yet |
 | Extended Control function status (GET) | Yes | Not yet |
 | Extended Control writes / speaker-pattern switch | No | No |
-| Legacy XML speaker levels and distances | No | No (historical RX-A3060 evidence above) |
+| Legacy XML active speaker pattern (GET) | Yes | Not yet with this build |
+| Legacy XML speaker PUT | No | No |
+| Legacy XML speaker levels and distances (aggregate GET) | Yes | Not yet with this build (historical RX-A3060 evidence above) |
 | YNCA state monitoring and commands | No | No |
 
 See [Protocol reference](PROTOCOLS.md) and [Speaker setup](SPEAKER_SETUP.md) for request formats and channel semantics.
