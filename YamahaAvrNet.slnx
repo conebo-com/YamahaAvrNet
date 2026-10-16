@@ -1,6 +1,5 @@
 <Solution>
   <Project Path="YamahaAvrNet.csproj" />
-  <Project Path="AvrNet.Abstractions/AvrNet.Abstractions.csproj" />
   <Project Path="YamahaAvrNet.Sample/YamahaAvrNet.Sample.csproj" />
   <Project Path="YamahaAvrNet.TesterGui/YamahaAvrNet.TesterGui.csproj" Id="ab177819-18c4-4c5a-9fc6-9aaf06423805" />
 </Solution>

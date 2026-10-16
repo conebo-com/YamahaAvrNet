@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using AvrNet.Abstractions.Interfaces;
-using AvrNet.Abstractions.Models;
 using YamahaAvrNet.Discovery;
 using YamahaAvrNet.Features.SpeakerSetup;
 using YamahaAvrNet.Models;
@@ -15,18 +13,18 @@ namespace YamahaAvrNet.PublicApi
     /// Independent Yamaha receiver facade. Currently supports read-only Extended
     /// Control discovery; YNCA, legacy XML and speaker writes are not yet available.
     /// </summary>
-    public sealed class YamahaAvrClient : IAvrReceiver
+    public sealed class YamahaAvrClient : IDisposable
     {
-        private static readonly IReadOnlyList<AvrZoneInfo> EmptyZones =
-            Array.AsReadOnly(new AvrZoneInfo[0]);
+        private static readonly IReadOnlyList<YamahaZoneInfo> EmptyZones =
+            Array.AsReadOnly(new YamahaZoneInfo[0]);
 
         private readonly YamahaAvrOptions _options;
         private readonly YamahaExtendedHttpClient _extendedHttp;
         private readonly SemaphoreSlim _lifecycleGate = new SemaphoreSlim(1, 1);
         private readonly object _stateSync = new object();
         private YamahaDeviceCapabilities _capabilities;
-        private IReadOnlyList<AvrZoneInfo> _zones = EmptyZones;
-        private AvrConnectionState _connectionState = AvrConnectionState.Disconnected;
+        private IReadOnlyList<YamahaZoneInfo> _zones = EmptyZones;
+        private YamahaConnectionState _connectionState = YamahaConnectionState.Disconnected;
         private YamahaExtendedDeviceInfo _deviceInfo;
         private YamahaExtendedFeatures _features;
         private YamahaExtendedFunctionStatus _functionStatus;
@@ -39,7 +37,7 @@ namespace YamahaAvrNet.PublicApi
             if (options == null)
                 throw new ArgumentNullException(nameof(options));
             _options = options.CopyValidated();
-            _capabilities = new YamahaDeviceCapabilities(new AvrCapability[0]);
+            _capabilities = new YamahaDeviceCapabilities(new YamahaCapability[0]);
             _extendedHttp = _options.EnableExtendedControl
                 ? new YamahaExtendedHttpClient(_options) : null;
             Speakers = new YamahaSpeakerSetupController(EnsureNotDisposed);
@@ -53,17 +51,17 @@ namespace YamahaAvrNet.PublicApi
             get { lock (_stateSync) return _deviceInfo == null ? null : _deviceInfo.ModelName; }
         }
 
-        public AvrConnectionState ConnectionState
+        public YamahaConnectionState ConnectionState
         {
-            get { lock (_stateSync) return _disposed ? AvrConnectionState.Disposed : _connectionState; }
+            get { lock (_stateSync) return _disposed ? YamahaConnectionState.Disposed : _connectionState; }
         }
 
-        public IReadOnlyList<AvrZoneInfo> Zones
+        public IReadOnlyList<YamahaZoneInfo> Zones
         {
             get { EnsureNotDisposed(); lock (_stateSync) return _zones; }
         }
 
-        public IReadOnlyList<AvrCapability> Capabilities
+        public IReadOnlyList<YamahaCapability> Capabilities
         {
             get { EnsureNotDisposed(); lock (_stateSync) return _capabilities.All; }
         }
@@ -92,7 +90,7 @@ namespace YamahaAvrNet.PublicApi
             get { EnsureNotDisposed(); lock (_stateSync) return _functionStatus; }
         }
 
-        public AvrCapability GetCapability(string featureId)
+        public YamahaCapability GetCapability(string featureId)
         {
             EnsureNotDisposed();
             lock (_stateSync) return _capabilities.Get(featureId);
@@ -117,7 +115,7 @@ namespace YamahaAvrNet.PublicApi
             try
             {
                 EnsureNotDisposed();
-                SetConnectionState(AvrConnectionState.Connecting);
+                SetConnectionState(YamahaConnectionState.Connecting);
                 try
                 {
                     var info = await _extendedHttp.GetDeviceInfoAsync(cancellationToken)
@@ -125,7 +123,7 @@ namespace YamahaAvrNet.PublicApi
                     lock (_stateSync)
                     {
                         UpdateIdentity(info);
-                        _connectionState = AvrConnectionState.Connected;
+                        _connectionState = YamahaConnectionState.Connected;
                         if (_features != null)
                             _capabilities = YamahaExtendedCapabilityMapper.Build(info, _features, _functionStatus);
                     }
@@ -150,7 +148,7 @@ namespace YamahaAvrNet.PublicApi
             try
             {
                 EnsureNotDisposed();
-                SetConnectionState(AvrConnectionState.Connecting);
+                SetConnectionState(YamahaConnectionState.Connecting);
                 try
                 {
                     await ReadInitializationAsync(cancellationToken).ConfigureAwait(false);
@@ -176,7 +174,7 @@ namespace YamahaAvrNet.PublicApi
                 {
                     if (_features == null || _deviceInfo == null)
                     {
-                        SetConnectionState(AvrConnectionState.Connecting);
+                        SetConnectionState(YamahaConnectionState.Connecting);
                         await ReadInitializationAsync(cancellationToken).ConfigureAwait(false);
                     }
                     else
@@ -188,7 +186,7 @@ namespace YamahaAvrNet.PublicApi
                             _functionStatus = status;
                             _lastUpdatedUtc = status.ObservedUtc;
                             _stale = false;
-                            _connectionState = AvrConnectionState.Connected;
+                            _connectionState = YamahaConnectionState.Connected;
                             _capabilities = YamahaExtendedCapabilityMapper.Build(
                                 _deviceInfo, _features, status);
                         }
@@ -208,9 +206,9 @@ namespace YamahaAvrNet.PublicApi
             var info = await _extendedHttp.GetDeviceInfoAsync(ct).ConfigureAwait(false);
             lock (_stateSync) UpdateIdentity(info);
             var features = await _extendedHttp.GetFeaturesAsync(ct).ConfigureAwait(false);
-            var zones = new List<AvrZoneInfo>();
+            var zones = new List<YamahaZoneInfo>();
             foreach (var zone in features.Zones)
-                zones.Add(new AvrZoneInfo(zone.NativeId, zone.NativeId));
+                zones.Add(new YamahaZoneInfo(zone.NativeId, zone.NativeId));
 
             lock (_stateSync)
             {
@@ -226,7 +224,7 @@ namespace YamahaAvrNet.PublicApi
                 _lastUpdatedUtc = status.ObservedUtc;
                 _capabilities = YamahaExtendedCapabilityMapper.Build(info, features, status);
                 _stale = false;
-                _connectionState = AvrConnectionState.Connected;
+                _connectionState = YamahaConnectionState.Connected;
             }
         }
 
@@ -240,7 +238,7 @@ namespace YamahaAvrNet.PublicApi
                 // HTTP is stateless. Mark snapshots stale; no persistent YNCA session exists yet.
                 lock (_stateSync)
                 {
-                    _connectionState = AvrConnectionState.Disconnected;
+                    _connectionState = YamahaConnectionState.Disconnected;
                     _stale = true;
                 }
             }
@@ -258,7 +256,7 @@ namespace YamahaAvrNet.PublicApi
                 _features = null;
                 _functionStatus = null;
                 _zones = EmptyZones;
-                _capabilities = new YamahaDeviceCapabilities(new AvrCapability[0]);
+                _capabilities = new YamahaDeviceCapabilities(new YamahaCapability[0]);
             }
             _deviceInfo = info;
             _lastUpdatedUtc = info.ObservedUtc;
@@ -271,11 +269,11 @@ namespace YamahaAvrNet.PublicApi
             {
                 _stale = true;
                 _connectionState = _deviceInfo != null
-                    ? AvrConnectionState.PartiallyConnected : AvrConnectionState.Faulted;
+                    ? YamahaConnectionState.PartiallyConnected : YamahaConnectionState.Faulted;
             }
         }
 
-        private void SetConnectionState(AvrConnectionState value)
+        private void SetConnectionState(YamahaConnectionState value)
         {
             lock (_stateSync) _connectionState = value;
         }
@@ -301,7 +299,7 @@ namespace YamahaAvrNet.PublicApi
             _disposed = true;
             if (_extendedHttp != null)
                 _extendedHttp.Dispose();
-            lock (_stateSync) _connectionState = AvrConnectionState.Disposed;
+            lock (_stateSync) _connectionState = YamahaConnectionState.Disposed;
         }
     }
 }

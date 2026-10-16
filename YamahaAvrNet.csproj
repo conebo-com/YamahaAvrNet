@@ -23,7 +23,6 @@
   </ItemGroup>
   <ItemGroup>
     <Reference Include="System.Net.Http" />
-    <ProjectReference Include="AvrNet.Abstractions/AvrNet.Abstractions.csproj" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>
 </Project>

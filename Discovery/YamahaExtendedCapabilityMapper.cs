@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using AvrNet.Abstractions.Models;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.PublicApi;
 
@@ -12,7 +11,7 @@ namespace YamahaAvrNet.Discovery
         internal static YamahaDeviceCapabilities Build(YamahaExtendedDeviceInfo device,
             YamahaExtendedFeatures features, YamahaExtendedFunctionStatus status)
         {
-            var values = new Dictionary<string, AvrCapability>(StringComparer.OrdinalIgnoreCase);
+            var values = new Dictionary<string, YamahaCapability>(StringComparer.OrdinalIgnoreCase);
             if (features == null)
                 return new YamahaDeviceCapabilities(values.Values);
 
@@ -58,27 +57,27 @@ namespace YamahaAvrNet.Discovery
 
             if (status != null && status.ActiveSpeakerPattern.HasValue)
                 AddReadVerified(values, "speaker.pattern", device, status.ObservedUtc,
-                    AvrEvidenceSource.ReadProbe);
+                    YamahaEvidenceSource.ReadProbe);
 
             return new YamahaDeviceCapabilities(values.Values);
         }
 
-        private static void AddAdvertised(Dictionary<string, AvrCapability> values,
+        private static void AddAdvertised(Dictionary<string, YamahaCapability> values,
             string id, YamahaExtendedDeviceInfo device)
         {
             if (values.ContainsKey(id))
                 return;
-            values[id] = new AvrCapability(id, AvrCapabilityStatus.Advertised,
-                AvrEvidenceSource.DeviceReported, protocol: "ExtendedControl",
+            values[id] = new YamahaCapability(id, YamahaCapabilityStatus.Advertised,
+                YamahaEvidenceSource.DeviceReported, protocol: "ExtendedControl",
                 model: device == null ? null : device.ModelName,
                 firmware: device == null ? null : device.SystemVersion);
         }
 
-        private static void AddReadVerified(Dictionary<string, AvrCapability> values,
+        private static void AddReadVerified(Dictionary<string, YamahaCapability> values,
             string id, YamahaExtendedDeviceInfo device, DateTimeOffset observedUtc,
-            AvrEvidenceSource evidence = AvrEvidenceSource.DeviceReported)
+            YamahaEvidenceSource evidence = YamahaEvidenceSource.DeviceReported)
         {
-            values[id] = new AvrCapability(id, AvrCapabilityStatus.ReadVerified,
+            values[id] = new YamahaCapability(id, YamahaCapabilityStatus.ReadVerified,
                 evidence, canRead: true,
                 protocol: "ExtendedControl",
                 model: device == null ? null : device.ModelName,

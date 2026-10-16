@@ -1,5 +1,4 @@
 using System;
-using AvrNet.Abstractions.Models;
 
 namespace YamahaAvrNet.Models
 {
@@ -11,8 +10,8 @@ namespace YamahaAvrNet.Models
     {
         public YamahaSpeakerChannelInfo(
             string nativeId,
-            AvrSpeakerRole? role = null,
-            AvrSpeakerPlacement? placement = null,
+            YamahaSpeakerRole? role = null,
+            YamahaSpeakerPlacement? placement = null,
             bool? isAddressable = null,
             bool? isConfigured = null,
             bool? isCurrentlyActive = null,
@@ -37,8 +36,8 @@ namespace YamahaAvrNet.Models
         }
 
         public string NativeId { get; private set; }
-        public AvrSpeakerRole? Role { get; private set; }
-        public AvrSpeakerPlacement? Placement { get; private set; }
+        public YamahaSpeakerRole? Role { get; private set; }
+        public YamahaSpeakerPlacement? Placement { get; private set; }
         public bool? IsAddressable { get; private set; }
         public bool? IsConfigured { get; private set; }
         public bool? IsCurrentlyActive { get; private set; }

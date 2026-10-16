@@ -4,7 +4,6 @@ using System.Globalization;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
-using AvrNet.Abstractions.Models;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.PublicApi;
 

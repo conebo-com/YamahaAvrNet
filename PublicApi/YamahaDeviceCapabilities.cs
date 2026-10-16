@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using AvrNet.Abstractions.Models;
+using YamahaAvrNet.Models;
 
 namespace YamahaAvrNet.PublicApi
 {
@@ -10,16 +10,16 @@ namespace YamahaAvrNet.PublicApi
     /// </summary>
     public sealed class YamahaDeviceCapabilities
     {
-        private readonly IReadOnlyList<AvrCapability> _all;
-        private readonly Dictionary<string, AvrCapability> _byId;
+        private readonly IReadOnlyList<YamahaCapability> _all;
+        private readonly Dictionary<string, YamahaCapability> _byId;
 
-        public YamahaDeviceCapabilities(IEnumerable<AvrCapability> capabilities)
+        public YamahaDeviceCapabilities(IEnumerable<YamahaCapability> capabilities)
         {
             if (capabilities == null)
                 throw new ArgumentNullException(nameof(capabilities));
 
-            var values = new List<AvrCapability>();
-            _byId = new Dictionary<string, AvrCapability>(StringComparer.OrdinalIgnoreCase);
+            var values = new List<YamahaCapability>();
+            _byId = new Dictionary<string, YamahaCapability>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var capability in capabilities)
             {
@@ -32,22 +32,22 @@ namespace YamahaAvrNet.PublicApi
                 values.Add(capability);
             }
 
-            _all = new ReadOnlyCollection<AvrCapability>(values);
+            _all = new ReadOnlyCollection<YamahaCapability>(values);
         }
 
-        public IReadOnlyList<AvrCapability> All { get { return _all; } }
+        public IReadOnlyList<YamahaCapability> All { get { return _all; } }
 
-        public AvrCapability Get(string featureId)
+        public YamahaCapability Get(string featureId)
         {
             if (string.IsNullOrWhiteSpace(featureId))
                 throw new ArgumentException("Feature ID must not be empty.", nameof(featureId));
 
-            AvrCapability capability;
+            YamahaCapability capability;
             if (_byId.TryGetValue(featureId, out capability))
                 return capability;
 
-            return new AvrCapability(featureId, AvrCapabilityStatus.Unknown,
-                AvrEvidenceSource.Unknown);
+            return new YamahaCapability(featureId, YamahaCapabilityStatus.Unknown,
+                YamahaEvidenceSource.Unknown);
         }
     }
 }

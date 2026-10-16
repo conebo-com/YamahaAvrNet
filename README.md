@@ -14,14 +14,17 @@ Open **`YamahaAvrNet.slnx`**. The repository does not use a `.sln` file.
 
 | Project | Purpose | Framework |
 | --- | --- | --- |
-| `AvrNet.Abstractions/` | Manufacturer-neutral interfaces and shared models | `net48` |
 | `YamahaAvrNet.csproj` + core source folders in the repository root | Standalone Yamaha library and Yamaha-specific API contracts | `net48` |
 | `YamahaAvrNet.Sample/` | Optional read-only console discovery example | `net48` |
 | `YamahaAvrNet.TesterGui/` | Standalone WPF application with manual read-only device discovery | .NET Framework 4.8 |
 
-All Yamaha library source files are located directly under the repository root (for example, `PublicApi/`, `Features/` and `Models/`). The root `YamahaAvrNet.csproj` explicitly includes only these source folders, preventing the sibling applications and shared abstractions from being compiled into the Yamaha assembly. There are no `src/`, `samples/` or `tools/` wrapper directories.
+All Yamaha library source files are located directly under the repository root (for example, `PublicApi/`, `Features/` and `Models/`). The root `YamahaAvrNet.csproj` explicitly includes only Yamaha source files. There are no `src/`, `samples/` or `tools/` wrapper directories.
 
-`YamahaAvrNet` can be referenced without `AvrDispatcher` and without WPF. The manufacturer-neutral abstractions are currently provisional and will need to be aligned with the latest `net48` DenonMarantzAvrNet API before relying on cross-manufacturer compatibility.
+### Standalone library and ownership of types
+
+YamahaAvrNet has **no dependency on `AvrNet.Abstractions`, `AvrDispatcher`, or DenonMarantzAvrNet**. Receiver lifecycle, capabilities, zone descriptions, connection state, and speaker roles use dedicated Yamaha types from `YamahaAvrNet.Models` and `YamahaAvrNet.PublicApi`. No dispatcher or manufacturer-neutral interface is required to use this library.
+
+Cross-manufacturer adapters and common contracts can be designed separately in the future AvrDispatcher project. Such adapters will consume YamahaAvrNet's public API; YamahaAvrNet will not reference AvrDispatcher.
 
 ## Requirements and build
 
@@ -76,7 +79,7 @@ The library uses `Newtonsoft.Json` 13.0.4, which provides a .NET Framework-compa
 - `YamahaAvrOptions` defines host, HTTP and YNCA ports, enabled protocols, and a request timeout. Constructing the client does not open a connection. The only implemented provider is currently Extended Control, so disable it only if you do not intend to connect yet.
 - System features, zones, inputs, sound programs, scene counts, speaker-pattern counts, and numeric ranges are read from actual Extended Control responses. Native speaker channel IDs will be discovered in the legacy-XML phase; no universal fixed mapping is assumed.
 - Capability status and evidence are tracked separately. An unknown capability is **not** treated as unsupported, and successful reads do not imply write permission.
-- Volume in the shared abstraction is expressed in **dB**. Speaker levels and distances use `decimal` for measured values, with native unit and exponent retained.
+- Extended Control volume ranges retain the receiver-reported **dB** values independently of its numerical display scale. Speaker levels and distances will use `decimal` for measured values, with native unit and exponent retained when those features are implemented.
 - Addressable speaker channels, configured speakers, and channels currently carrying a signal are distinct concepts.
 - YNCA command handling and status monitoring will share one receiver connection; the WPF application will not contain protocol-specific networking logic.
 - Discovery must remain read-only. Write operations require verified capabilities, explicit user action, validation, and readback rather than blind retries.

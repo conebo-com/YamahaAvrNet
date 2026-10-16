@@ -1,10 +1,10 @@
 using System;
 
-namespace AvrNet.Abstractions.Models
+namespace YamahaAvrNet.Models
 {
-    public sealed class AvrZoneInfo
+    public sealed class YamahaZoneInfo
     {
-        public AvrZoneInfo(string nativeId, string displayName)
+        public YamahaZoneInfo(string nativeId, string displayName)
         {
             if (string.IsNullOrWhiteSpace(nativeId))
                 throw new ArgumentException("A zone needs a native ID.", nameof(nativeId));

@@ -1,5 +1,5 @@
 using System;
-using AvrNet.Abstractions.Models;
+using YamahaAvrNet.Models;
 
 namespace YamahaAvrNet.PublicApi
 {
@@ -9,7 +9,7 @@ namespace YamahaAvrNet.PublicApi
     /// </summary>
     public sealed class YamahaReceiverState
     {
-        public YamahaReceiverState(AvrConnectionState connectionState,
+        public YamahaReceiverState(YamahaConnectionState connectionState,
             DateTimeOffset? lastUpdatedUtc, bool isStale, string model)
         {
             if (lastUpdatedUtc.HasValue && lastUpdatedUtc.Value.Offset != TimeSpan.Zero)
@@ -21,7 +21,7 @@ namespace YamahaAvrNet.PublicApi
             Model = model;
         }
 
-        public AvrConnectionState ConnectionState { get; private set; }
+        public YamahaConnectionState ConnectionState { get; private set; }
         public DateTimeOffset? LastUpdatedUtc { get; private set; }
         public bool IsStale { get; private set; }
         public string Model { get; private set; }

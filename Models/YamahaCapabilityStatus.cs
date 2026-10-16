@@ -1,7 +1,7 @@
-namespace AvrNet.Abstractions.Models
+namespace YamahaAvrNet.Models
 {
     /// <summary>Evidence strength for one device feature, not a universal model claim.</summary>
-    public enum AvrCapabilityStatus
+    public enum YamahaCapabilityStatus
     {
         Unknown = 0,
         Advertised = 1,

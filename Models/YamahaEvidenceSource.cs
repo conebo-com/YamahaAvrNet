@@ -1,6 +1,6 @@
-namespace AvrNet.Abstractions.Models
+namespace YamahaAvrNet.Models
 {
-    public enum AvrEvidenceSource
+    public enum YamahaEvidenceSource
     {
         Unknown = 0,
         DeviceReported = 1,

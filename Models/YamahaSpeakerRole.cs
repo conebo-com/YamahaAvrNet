@@ -1,7 +1,7 @@
-namespace AvrNet.Abstractions.Models
+namespace YamahaAvrNet.Models
 {
     /// <summary>Semantic speaker function. Never infer it from an array index.</summary>
-    public enum AvrSpeakerRole
+    public enum YamahaSpeakerRole
     {
         Unknown = 0,
         FrontLeft,

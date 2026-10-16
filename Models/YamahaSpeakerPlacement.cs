@@ -1,7 +1,7 @@
-namespace AvrNet.Abstractions.Models
+namespace YamahaAvrNet.Models
 {
     /// <summary>Physical placement; independent of role and native channel ID.</summary>
-    public enum AvrSpeakerPlacement
+    public enum YamahaSpeakerPlacement
     {
         Unknown = 0,
         Floor,

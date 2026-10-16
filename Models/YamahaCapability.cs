@@ -1,16 +1,16 @@
 using System;
 
-namespace AvrNet.Abstractions.Models
+namespace YamahaAvrNet.Models
 {
     /// <summary>
     /// Unknown permission is null, not false. A successful read must not grant write access.
     /// </summary>
-    public sealed class AvrCapability
+    public sealed class YamahaCapability
     {
-        public AvrCapability(
+        public YamahaCapability(
             string featureId,
-            AvrCapabilityStatus status,
-            AvrEvidenceSource evidence,
+            YamahaCapabilityStatus status,
+            YamahaEvidenceSource evidence,
             bool? canRead = null,
             bool? canWrite = null,
             bool? canExecute = null,
@@ -39,8 +39,8 @@ namespace AvrNet.Abstractions.Models
         }
 
         public string FeatureId { get; private set; }
-        public AvrCapabilityStatus Status { get; private set; }
-        public AvrEvidenceSource Evidence { get; private set; }
+        public YamahaCapabilityStatus Status { get; private set; }
+        public YamahaEvidenceSource Evidence { get; private set; }
         public bool? CanRead { get; private set; }
         public bool? CanWrite { get; private set; }
         public bool? CanExecute { get; private set; }

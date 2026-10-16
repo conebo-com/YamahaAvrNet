@@ -1,7 +1,7 @@
-namespace AvrNet.Abstractions.Models
+namespace YamahaAvrNet.Models
 {
     /// <summary>Transport lifecycle, not an assertion about every protocol.</summary>
-    public enum AvrConnectionState
+    public enum YamahaConnectionState
     {
         Disconnected = 0,
         Connecting = 1,
