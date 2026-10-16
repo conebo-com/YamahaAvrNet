@@ -40,11 +40,13 @@ msbuild .\YamahaAvrNet.slnx /restore /p:Configuration=Debug
 
 To launch the GUI, open `YamahaAvrNet.slnx` in Visual Studio and select **`YamahaAvrNet.TesterGui`** as the startup project. Enter the receiver's IP address/hostname and HTTP port (normally `80`), then choose **Connect and discover**. No requests are sent on application startup.
 
-The console example performs the same discovery only when a host argument is supplied:
+The console sample asks for the receiver IP address or hostname and optional HTTP port **interactively** after starting. No command-line arguments are required:
 
 ```powershell
-.\YamahaAvrNet.Sample\bin\Debug\net48\YamahaAvrNet.Sample.exe 192.168.1.50 80
+.\YamahaAvrNet.Sample\bin\Debug\net48\YamahaAvrNet.Sample.exe
 ```
+
+Enter the receiver IP address or hostname when prompted. Press **Enter** to accept the default HTTP port `80`. The sample performs read-only discovery and then displays the detected receiver information. Press **Enter** at the final prompt to close the console window.
 
 The three GETs return device identity (model/firmware/API), system and per-zone functions, native zone/input/sound IDs, scene counts, native numeric ranges, speaker-pattern count and active pattern when the receiver reports them. **Actual device behavior is not automatically verified by merely compiling the library.**
 
