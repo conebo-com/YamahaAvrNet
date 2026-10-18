@@ -60,6 +60,7 @@ namespace YamahaAvrNet.PublicApi
         private bool _stale = true;
         private volatile bool _disposed;
         private YamahaReceiverState _lastPublishedState;
+        private bool _monitorPollInProgress;
 
         /// <summary>A new immutable receiver snapshot was observed; events never grant write access.</summary>
         public event EventHandler<YamahaReceiverStateChangedEventArgs> ReceiverStateChanged;
@@ -638,14 +639,15 @@ namespace YamahaAvrNet.PublicApi
             try
             {
                 EnsureNotDisposed();
-                // HTTP is stateless; close the separate persistent YNCA session.
-                if (_yncaSession != null)
-                    _yncaSession.Disconnect();
+                // Mark the deliberate disconnect before YNCA emits its close event.
+                // That event must not briefly report an unexpected outage.
                 lock (_stateSync)
                 {
                     _connectionState = YamahaConnectionState.Disconnected;
                     _stale = true;
                 }
+                if (_yncaSession != null)
+                    _yncaSession.Disconnect();
                 PublishStateSnapshot();
             }
             finally { _lifecycleGate.Release(); }
@@ -684,10 +686,46 @@ namespace YamahaAvrNet.PublicApi
         }
 
         /// <summary>Used by the opt-in monitor when all polling paths fail.</summary>
+        internal void BeginMonitoringPoll()
+        {
+            lock (_stateSync) _monitorPollInProgress = true;
+        }
+
+        internal void EndMonitoringPoll()
+        {
+            lock (_stateSync) _monitorPollInProgress = false;
+            PublishStateSnapshot();
+        }
+
+        internal void MarkMonitoringZoneStale(string nativeZoneId)
+        {
+            if (_disposed || _zoneController == null) return;
+            _zoneController.MarkStale(nativeZoneId);
+        }
+
+        internal void MarkMonitoringReconnecting()
+        {
+            if (_disposed) return;
+            lock (_stateSync)
+            {
+                if (_connectionState == YamahaConnectionState.Disconnected ||
+                    _connectionState == YamahaConnectionState.Disposed) return;
+                _connectionState = YamahaConnectionState.Reconnecting;
+                _stale = true;
+            }
+            PublishStateSnapshot();
+        }
+
         internal void MarkMonitoringFailure()
         {
             if (_disposed) return;
-            MarkFailure();
+            lock (_stateSync)
+            {
+                _stale = true;
+                // No successfully refreshed protocol remains. A previously
+                // discovered model does not mean the receiver is reachable.
+                _connectionState = YamahaConnectionState.Faulted;
+            }
             PublishStateSnapshot();
         }
 
@@ -718,12 +756,47 @@ namespace YamahaAvrNet.PublicApi
 
         private void ZoneStateChanged(object sender, YamahaZoneStateChangedEventArgs args)
         {
+            // The zone controller is subscribed before this facade to the TCP
+            // disconnect event. Publish transport and stale-zone state together,
+            // instead of briefly exposing a stale zone as fully connected.
+            if (args.State.IsStale && _yncaSession != null && !_yncaSession.IsConnected)
+            {
+                lock (_stateSync)
+                {
+                    if (_connectionState != YamahaConnectionState.Connecting &&
+                        _connectionState != YamahaConnectionState.Disconnected &&
+                        _connectionState != YamahaConnectionState.Disposed)
+                    {
+                        _stale = true;
+                        _connectionState = _deviceInfo == null
+                            ? YamahaConnectionState.Reconnecting
+                            : YamahaConnectionState.PartiallyConnected;
+                    }
+                }
+            }
             PublishStateSnapshot();
         }
 
         private void SessionConnectionChanged(object sender, YamahaYncaConnectionEventArgs args)
         {
-            // The HTTP path may be healthy; only YNCA-observed zones become stale.
+            if (_disposed) return;
+            if (!args.IsConnected)
+            {
+                lock (_stateSync)
+                {
+                    // Discovery deliberately opens and closes a temporary YNCA
+                    // session. Never mistake that for a runtime outage.
+                    if (_connectionState != YamahaConnectionState.Connecting &&
+                        _connectionState != YamahaConnectionState.Disconnected &&
+                        _connectionState != YamahaConnectionState.Disposed)
+                    {
+                        _stale = true;
+                        _connectionState = _deviceInfo == null
+                            ? YamahaConnectionState.Reconnecting
+                            : YamahaConnectionState.PartiallyConnected;
+                    }
+                }
+            }
             PublishStateSnapshot();
         }
 
@@ -736,9 +809,13 @@ namespace YamahaAvrNet.PublicApi
             if (_disposed) return;
             var handler = ReceiverStateChanged;
             if (handler == null) return;
-            YamahaReceiverState state = GetState();
+            YamahaReceiverState state;
             lock (_stateSync)
             {
+                // Check batching and capture under the SAME lock, so a poll
+                // cannot begin between the check and the publication decision.
+                if (_monitorPollInProgress) return;
+                state = CaptureStateLocked();
                 if (SameState(_lastPublishedState, state)) return;
                 _lastPublishedState = state;
             }

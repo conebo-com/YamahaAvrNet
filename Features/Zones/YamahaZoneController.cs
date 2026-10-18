@@ -225,10 +225,14 @@ namespace YamahaAvrNet.Features.Zones
             {
                 YamahaZoneState old;
                 _states.TryGetValue(zoneId, out old);
-                bool? power = old == null ? null : old.IsPoweredOn;
-                decimal? volume = old == null ? null : old.VolumeDb;
-                bool? mute = old == null ? null : old.IsMuted;
-                string input = old == null ? null : old.InputNativeId;
+                // After a transport loss an old value must not become "fresh"
+                // merely because a different field was received on reconnect.
+                // Rebuild the current zone only from post-reconnect observations.
+                bool fresh = old != null && !old.IsStale;
+                bool? power = fresh ? old.IsPoweredOn : null;
+                decimal? volume = fresh ? old.VolumeDb : null;
+                bool? mute = fresh ? old.IsMuted : null;
+                string input = fresh ? old.InputNativeId : null;
                 string value = msg.Value;
                 switch (msg.Function.ToUpperInvariant())
                 {
@@ -259,6 +263,25 @@ namespace YamahaAvrNet.Features.Zones
                 if (!changed) return;
             }
             RaiseStateChanged(result);
+        }
+
+        /// <summary>
+        /// A failed zone refresh must not leave its last cached observation marked
+        /// current. Other zones and HTTP observations are unaffected.
+        /// </summary>
+        internal void MarkStale(string nativeZoneId)
+        {
+            if (string.IsNullOrWhiteSpace(nativeZoneId)) return;
+            YamahaZoneState stale;
+            lock (_sync)
+            {
+                YamahaZoneState current;
+                if (!_states.TryGetValue(nativeZoneId, out current) || current.IsStale) return;
+                stale = new YamahaZoneState(current.NativeId, current.IsPoweredOn,
+                    current.VolumeDb, current.IsMuted, current.InputNativeId, current.ObservedUtc, true);
+                _states[nativeZoneId] = stale;
+            }
+            RaiseStateChanged(stale);
         }
 
         private void SessionOnConnectionChanged(object sender, YamahaYncaConnectionEventArgs e)

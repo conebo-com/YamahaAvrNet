@@ -133,8 +133,10 @@ These fields should remain **unknown**, not inferred from prior DSP settings.
 
 Phase 5.6 implements explicit read-only HTTP/YNCA monitoring, read-only zone
 function filtering using the receiver's feature list, independent per-zone
-staleness and caller-facing state/poll events. The new monitoring behavior has
-not yet been verified against a physical receiver or compiled on Windows.
+staleness and caller-facing state/poll events. RX-A3060 console output confirmed
+four consecutive 30-second polling cycles with five successful read paths per
+cycle. This confirms routine polling only; it does not confirm recovery after a
+network outage or automatic reconnection.
 Other Yamaha models are not automatically considered compatible solely because
 they share a protocol family. Read-only polling grants no write permissions.
 
@@ -147,3 +149,20 @@ read-only contract without a shared abstractions project or reverse dependency.
 
 Overview timestamps and feature evidence do not establish live device
 connectivity or write support. Individual zone values can remain unknown/stale.
+
+## Monitoring lifecycle hardening (Phase 6.2)
+
+Phase 6.2 adds coherent receiver-level notifications per polling cycle, safe
+stop/start synchronization, bounded read-only reconnection attempts and stricter
+stale-state handling. A complete failed poll reports `Faulted`; the following
+retry reports `Reconnecting`; partial recovery reports `PartiallyConnected`.
+
+Cached zone values are preserved as stale while disconnected, but when one
+new YNCA field arrives the other pre-disconnect values are reset to unknown
+until individually observed. This prevents a future AvrDispatcher adapter from
+misinterpreting old information as current. Read-only recovery cannot grant
+write permission or resend a PUT.
+
+**Verification status:** the 6.2 changes have not been compiled with Visual
+Studio or tested through a real network interruption on the RX-A3060. A
+receiver-specific test is required before declaring reconnect fully verified.

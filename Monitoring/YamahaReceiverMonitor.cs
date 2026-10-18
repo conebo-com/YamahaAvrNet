@@ -18,6 +18,7 @@ namespace YamahaAvrNet.Monitoring
         private readonly object _sync = new object();
         private CancellationTokenSource _cts;
         private Task _worker;
+        private bool _stopping;
         private bool _disposed;
         private string _lastError;
         private DateTimeOffset? _lastPollUtc;
@@ -63,6 +64,10 @@ namespace YamahaAvrNet.Monitoring
             }
         }
 
+        /// <summary>
+        /// Stop only after the worker has actually exited. A concurrent Start cannot
+        /// overlap with an unfinished old worker, and concurrent Stop calls are safe.
+        /// </summary>
         public async Task StopAsync()
         {
             CancellationTokenSource cts;
@@ -71,17 +76,31 @@ namespace YamahaAvrNet.Monitoring
             {
                 cts = _cts;
                 worker = _worker;
-                _cts = null;
-                _worker = null;
+                if (cts == null) return;
+                if (!_stopping)
+                {
+                    _stopping = true;
+                    cts.Cancel();
+                }
             }
-            if (cts == null) return;
-            cts.Cancel();
             try
             {
                 if (worker != null) await worker.ConfigureAwait(false);
             }
             catch (OperationCanceledException) { }
-            finally { cts.Dispose(); }
+            finally
+            {
+                lock (_sync)
+                {
+                    if (ReferenceEquals(_cts, cts))
+                    {
+                        _cts = null;
+                        _worker = null;
+                        _stopping = false;
+                        cts.Dispose();
+                    }
+                }
+            }
         }
 
         private async Task LoopAsync(TimeSpan interval, CancellationToken ct)
@@ -89,8 +108,13 @@ namespace YamahaAvrNet.Monitoring
             int failures = 0;
             while (!ct.IsCancellationRequested)
             {
+                // Reconnecting denotes an active read-only recovery attempt after a
+                // completely failed cycle, not proof that TCP is already connected.
+                if (failures > 0) _receiver.MarkMonitoringReconnecting();
+                _receiver.BeginMonitoringPoll();
                 int successes = 0;
                 var errors = new List<string>();
+                YamahaMonitorPollEventArgs completed = null;
                 try
                 {
                     // HTTP status and native YNCA are independent: failure of one
@@ -123,11 +147,15 @@ namespace YamahaAvrNet.Monitoring
                                     !zoneSnapshot.IsStale)
                                     successes++;
                                 else
+                                {
+                                    _receiver.MarkMonitoringZoneStale(zone.NativeId);
                                     errors.Add("YNCA " + zone.NativeId + ": no fresh value observed.");
+                                }
                             }
                             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                             catch (Exception ex)
                             {
+                                _receiver.MarkMonitoringZoneStale(zone.NativeId);
                                 errors.Add("YNCA " + zone.NativeId + ": " + ex.Message);
                                 // Do not attempt four fresh TCP connects to the same
                                 // offline receiver in a single polling iteration.
@@ -135,6 +163,7 @@ namespace YamahaAvrNet.Monitoring
                             }
                         }
                     }
+                    ct.ThrowIfCancellationRequested();
                     if (successes == 0)
                     {
                         _receiver.MarkMonitoringFailure();
@@ -154,8 +183,8 @@ namespace YamahaAvrNet.Monitoring
                         _lastError = detail;
                         if (successes > 0) _lastSuccessfulPollUtc = polledAtUtc;
                     }
-                    RaisePollCompleted(new YamahaMonitorPollEventArgs(polledAtUtc,
-                        successes > 0, successes, detail));
+                    completed = new YamahaMonitorPollEventArgs(polledAtUtc,
+                        successes > 0, successes, detail);
                     failures = successes > 0 ? 0 : Math.Min(failures + 1, 4);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
@@ -171,9 +200,18 @@ namespace YamahaAvrNet.Monitoring
                         _lastError = ex.Message;
                     }
                     _receiver.MarkMonitoringFailure();
-                    RaisePollCompleted(new YamahaMonitorPollEventArgs(
-                        DateTimeOffset.UtcNow, false, 0, ex.Message));
+                    completed = new YamahaMonitorPollEventArgs(
+                        DateTimeOffset.UtcNow, false, 0, ex.Message);
                 }
+                finally
+                {
+                    // Release one coherent receiver snapshot for this poll instead
+                    // of one event for each arriving PWR/VOL/MUTE/INP field.
+                    _receiver.EndMonitoringPoll();
+                }
+                // The public poll event follows the coherent receiver-state event,
+                // and cancelled/incomplete cycles publish no completed-poll event.
+                if (completed != null) RaisePollCompleted(completed);
                 // Capped backoff for wholly unreachable devices. Partial success
                 // retains the requested interval, even when one protocol fails.
                 double seconds = Math.Min(180.0, interval.TotalSeconds * (failures + 1));
@@ -184,6 +222,7 @@ namespace YamahaAvrNet.Monitoring
 
         private void RaisePollCompleted(YamahaMonitorPollEventArgs result)
         {
+            if (_disposed) return;
             var handler = PollCompleted;
             if (handler == null) return;
             foreach (EventHandler<YamahaMonitorPollEventArgs> listener in handler.GetInvocationList())

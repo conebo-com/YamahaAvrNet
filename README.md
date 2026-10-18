@@ -451,8 +451,32 @@ No autonomous status writes, command retries or separate monitoring process are
 created. Monitoring is not a replacement for an always-connected hardware
 availability probe or a periodic audio-signal check.
 
-**Validation:** The Phase 5.6 implementation is awaiting a Windows `net48`
-build and hardware test. Previous RX-A3060 console output confirmed read-only
+**Validation:** RX-A3060 console output confirmed four normal Phase 5.6
+monitoring cycles at 30-second intervals, each reporting five successful read
+paths. Interruption/reconnect testing and a Windows `net48` build of Phase 6.2
+are still outstanding. Previous RX-A3060 console output confirmed read-only
 advanced DSP `3DCINEMA=Auto` and `ADAPTIVEDSP=Auto`. Without playback,
 `getSignalInfo` returned `response_code=0` and `audio.error=0`, with unknown
 format and sample rate. This is not evidence of any particular input codec.
+
+## Monitoring and reconnect hardening (Phase 6.2)
+
+`Monitor.Start(interval)` remains an explicit, read-only opt-in. A monitoring
+iteration now batches field-level YNCA observations into **one receiver-level
+`ReceiverStateChanged` snapshot**, while individual
+`ZoneControl.ZoneStateChanged` events still report per-field changes. Push
+events received outside an active poll remain immediately observable.
+
+When a YNCA connection drops, cached zones become stale. When communication
+returns, the first new field observation does not silently make unrelated old
+fields current: unrefreshed properties are `null` until separately observed.
+A failed zone refresh marks only that zone stale. An unsuccessful full poll
+uses bounded retry delay and exposes `Reconnecting` on the next attempt.
+No automatic reconnection task exists outside monitoring or explicit GETs.
+
+Stopping monitoring now waits for the previous worker to exit before a new
+worker may start; concurrent stops safely await the same worker. Explicit
+`DisconnectAsync()` still stops monitoring first and does not trigger an
+unwanted reconnect. All recovery operations remain GET-only; writes are never
+retried or sent by the monitor. Reconnect and stop/start behavior require
+Windows `net48` build and real-device verification.

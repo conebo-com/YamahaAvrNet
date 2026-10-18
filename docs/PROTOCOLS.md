@@ -274,3 +274,15 @@ that are absent from its advertised list (for instance, Zone 4 volume/mute on
 the RX-A3060). For YNCA-only receivers lacking Extended Control metadata,
 individual known GETs remain exploratory reads and do not imply write support.
 Polling is manual opt-in and stops on explicit receiver disconnect/disposal.
+
+## Monitoring recovery (Phase 6.2)
+
+Polling is opt-in, serial per receiver and independent across HTTP and YNCA.
+Only the existing one-connection YNCA session is used. After a complete poll
+failure, the next attempt exposes `Reconnecting`; a successful read returns to
+`Connected`, while partial success with errors reports `PartiallyConnected`.
+Cached zone data is marked stale on YNCA disconnect or per-zone read failure.
+After reconnect, unobserved fields remain unknown rather than inheriting
+pre-disconnect values as if they were freshly confirmed. Receiver-level
+notifications are batched per poll to avoid field-by-field event bursts.
+No background write operations or implicit retries of PUT commands exist.
