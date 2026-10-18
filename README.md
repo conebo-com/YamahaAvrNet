@@ -81,7 +81,7 @@ Enter the receiver IP address or hostname when prompted. Press **Enter** to acce
 
 The core Extended Control discovery GETs return device identity (model/firmware/API), system and per-zone functions, native zone/input/sound IDs, scene counts, native numeric ranges, speaker-pattern count and active pattern when the receiver reports them. These reads have been observed on an RX-A3060, firmware 2.86; other receiver models are not assumed compatible.
 
-The WPF application is a **manual** command and diagnostic interface, not an automated test suite. It refuses writes unless the user opted in before connecting and explicitly confirms the selected target and current setting. Its HTTP output displays operation summaries, **not captured raw network traffic**. The GUI has YNCA connect/disconnect controls, read-only commands, and separately opted-in typed zone write commands with confirmation; unsolicited TCP messages are shown in the YNCA pane. Bilingual language switching and compatibility-report export remain future GUI work. The core library contains no WPF dependency. The `net48` target does not imply supported Linux or Raspberry Pi execution.
+The WPF application is a **manual** command and diagnostic interface, not an automated test suite. It refuses writes unless the user opted in before connecting and explicitly confirms the selected target and current setting. Its HTTP output displays operation summaries, **not captured raw network traffic**. The GUI has YNCA connect/disconnect controls, read-only commands, and separately opted-in typed zone write commands with confirmation; unsolicited TCP messages are shown in the YNCA pane. The WPF tester offers English/German labels, a filtered grouped command list, resizable output panes, a receiver web-page shortcut, and a locally generated compatibility report. The report uses existing discovery snapshots and does not send any new commands or upload data. The host/IP address is omitted by default and can be included only through an explicit option. Native diagnostics remain in English. The core library contains no WPF dependency. The `net48` target does not imply supported Linux or Raspberry Pi execution.
 
 ## Read-only YNCA TCP example
 
@@ -480,3 +480,33 @@ worker may start; concurrent stops safely await the same worker. Explicit
 unwanted reconnect. All recovery operations remain GET-only; writes are never
 retried or sent by the monitor. Reconnect and stop/start behavior require
 Windows `net48` build and real-device verification.
+
+
+## Phase 6.3: WPF tester usability and DenonMarantz alignment
+
+The standalone WPF command browser now follows the DenonMarantz tester more
+closely while preserving Yamaha-specific protocol controls. The toolbar can
+open the receiver's HTTP web page on explicit request; this action is not part
+of receiver discovery. A two-language EN/DE selector translates command group
+names and user-interface labels without changing native Yamaha identifiers or
+library error messages. Search matches commands in both languages and their
+stable native action keys. Drag the panel splitters to resize the command
+browser and the three output panes. HTTP output still consists of **operation
+summaries**, not intercepted wire-level traffic.
+
+The **Compatibility report** button opens a separate local preview window.
+The report is created only from previously discovered, in-process metadata;
+opening, copying and saving it performs **no receiver requests and no write
+operations**. It excludes the receiver host/IP by default, never includes MAC
+addresses or serial numbers, and is never automatically submitted. A checkbox
+may explicitly include the host/IP in the exported text; review any report
+before sharing. Unlike a live compatibility test, the report does not verify
+unknown routes or prove device-specific write support. Double-clicking a
+write command does not execute it: users must click **Send**, have enabled the
+appropriate write option before connecting, and pass the existing confirmation
+and library validation. All previously supported commands remain available.
+
+This GUI-only phase does not change the core public API, command protocols,
+monitoring behavior, or future AvrDispatcher boundaries. A complete Windows
+`.NET Framework 4.8` build and GUI visual/functional inspection are still
+required; static checks alone are not build or receiver verification.

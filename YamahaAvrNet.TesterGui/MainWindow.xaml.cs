@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -23,6 +24,9 @@ namespace YamahaAvrNet.TesterGui
     {
         private YamahaAvrClient _receiver;
         private bool _busy;
+        private bool _german;
+        private ICollectionView _commandView;
+        private List<TesterCommand> _commands;
 
         public MainWindow()
         {
@@ -68,11 +72,167 @@ namespace YamahaAvrNet.TesterGui
                 new TesterCommand("Scenes", "Show available scene numbers", "scene-list"),
                 new TesterCommand("Scenes", "Recall scene by number", "scene-recall", false, true)
             };
-            LstCommands.ItemsSource = commands;
-            ICollectionView view = CollectionViewSource.GetDefaultView(LstCommands.ItemsSource);
-            view.GroupDescriptions.Add(new PropertyGroupDescription("Group"));
+            _commands = commands;
+            LstCommands.ItemsSource = _commands;
+            _commandView = CollectionViewSource.GetDefaultView(LstCommands.ItemsSource);
+            _commandView.GroupDescriptions.Add(new PropertyGroupDescription("Group"));
+            _commandView.Filter = FilterCommand;
             LstCommands.SelectedIndex = 0;
+            ApplyLanguage();
             UpdateControls();
+        }
+
+        private bool FilterCommand(object item)
+        {
+            var command = item as TesterCommand;
+            if (command == null) return false;
+            var search = TxtCommandSearch == null ? "" : TxtCommandSearch.Text.Trim();
+            return search.Length == 0 ||
+                command.Name.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                command.Group.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                command.EnglishName.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                command.EnglishGroup.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                command.Key.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private void TxtCommandSearch_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_commandView != null) _commandView.Refresh();
+            UpdateControls();
+        }
+
+        private void BtnClearSearch_Click(object sender, RoutedEventArgs e)
+        {
+            TxtCommandSearch.Clear();
+            TxtCommandSearch.Focus();
+        }
+
+        private void TglEnglish_Click(object sender, RoutedEventArgs e)
+        {
+            SetLanguage(false);
+        }
+
+        private void TglGerman_Click(object sender, RoutedEventArgs e)
+        {
+            SetLanguage(true);
+        }
+
+        private void SetLanguage(bool german)
+        {
+            _german = german;
+            ApplyLanguage();
+        }
+
+        private string T(string english)
+        {
+            return GuiText.Get(english, _german);
+        }
+
+        private void ApplyLanguage()
+        {
+            Title = T("Yamaha AVR Tester");
+            LblHost.Text = T("Host:");
+            LblHttpPort.Text = T("HTTP port:");
+            BtnConnect.Content = T("Connect");
+            BtnRefresh.Content = T("Refresh");
+            BtnDisconnect.Content = T("Disconnect");
+            BtnOpenWebPage.Content = T("Receiver web page");
+            LblLanguage.Text = T("Language:");
+            LblYncaPort.Text = T("YNCA TCP port:");
+            BtnYncaConnect.Content = T("Connect YNCA");
+            BtnYncaDisconnect.Content = T("Disconnect YNCA");
+            LblResult.Text = T("Result");
+            LblHttpOutput.Text = T("HTTP output (operation summaries)");
+            LblYncaOutput.Text = T("YNCA / TCP output");
+            LblPattern.Text = T("Speaker pattern number:");
+            LblWriteValue.Text = T("Target value (e.g. -36.5, On, AUDIO1):");
+            LblZone.Text = T("Zone ID (main, zone2, zone3, zone4):");
+            LblYncaSubunit.Text = T("YNCA subunit (e.g. MAIN):");
+            LblYncaFunction.Text = T("YNCA function (e.g. VOL):");
+            ChkEnableVerifiedWrites.Content = T("Enable limited RX-A3060 speaker writes (reconnect required)");
+            ChkEnableYncaWrites.Content = T("Enable YNCA zone writes (reconnect required)");
+            ChkEnableSoundWrites.Content = T("Enable sound / scene writes (reconnect required)");
+            BtnSend.Content = T("Send");
+            ChkClearBeforeOperation.Content = T("Clear outputs before each operation");
+            BtnClear.Content = T("Clear outputs");
+            BtnCompatibility.Content = T("Compatibility report...");
+            TxtReportHint.Text = T("Compatibility report: review a local, read-only discovery snapshot. Nothing is uploaded automatically.");
+            TglEnglish.IsChecked = !_german;
+            TglGerman.IsChecked = _german;
+            if (_commands != null)
+                foreach (var command in _commands) command.ApplyLanguage(_german);
+            if (_commandView != null) _commandView.Refresh();
+            TxtConnectionStatus.Text = _receiver == null ? T("Not connected") :
+                (_german ? "Verbunden: " : "Connected: ") + Show(_receiver.Model);
+            if (LstCommands.SelectedItem == null && _commandView != null && !_commandView.IsEmpty)
+                LstCommands.SelectedIndex = 0;
+            LstCommands_SelectionChanged(null, null);
+            UpdateControls();
+        }
+
+        private void BtnOpenWebPage_Click(object sender, RoutedEventArgs e)
+        {
+            string host = TxtHost.Text.Trim();
+            int port;
+            if (Uri.CheckHostName(host) == UriHostNameType.Unknown ||
+                !int.TryParse(TxtPort.Text.Trim(), out port) || port < 1 || port > 65535)
+            {
+                AppendResult("Enter a valid receiver hostname/IP address and HTTP port first.");
+                return;
+            }
+            try
+            {
+                var uri = new UriBuilder(Uri.UriSchemeHttp, host, port).Uri;
+                Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+            }
+            catch (Exception ex)
+            {
+                AppendResult("Could not open receiver web page: " + ex.Message);
+            }
+        }
+
+        private void BtnCompatibility_Click(object sender, RoutedEventArgs e)
+        {
+            if (_busy || _receiver == null) return;
+            // The window reads only the already captured local snapshot; no receiver requests.
+            var report = new CompatibilityReportWindow(this, BuildCompatibilityReport, _german);
+            report.ShowDialog();
+        }
+
+        private string BuildCompatibilityReport(bool includeHost)
+        {
+            var snapshot = _receiver.GetOverview();
+            var info = _receiver.DeviceInfo;
+            var sb = new StringBuilder();
+            sb.AppendLine("YamahaAvrNet - receiver compatibility report");
+            sb.AppendLine("Generated UTC: " + DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+            sb.AppendLine("Local discovery snapshot. No new probes and no writes were performed.");
+            sb.AppendLine("Not an exhaustive hardware compatibility test.");
+            sb.AppendLine();
+            if (includeHost) sb.AppendLine("Receiver host: " + TxtHost.Text.Trim());
+            sb.AppendLine("Model: " + Show(_receiver.Model));
+            sb.AppendLine("Firmware: " + Show(info == null ? null : info.SystemVersion));
+            sb.AppendLine("Extended Control API: " + Show(info == null ? null : info.ApiVersion));
+            sb.AppendLine("Connection: " + snapshot.State.ConnectionState + ", stale=" + snapshot.State.IsStale);
+            sb.AppendLine("Discovered zones: " + string.Join(", ", snapshot.DiscoveredZones.Select(z => z.NativeId)));
+            sb.AppendLine("Capabilities: " + snapshot.Capabilities.Count);
+            sb.AppendLine("Function routes: " + snapshot.FunctionRoutes.Count);
+            sb.AppendLine();
+            sb.AppendLine("Protocol discovery:");
+            foreach (var probe in snapshot.Protocols.Values.OrderBy(x => x.Protocol))
+                sb.AppendLine("  " + probe.Protocol + ": " + probe.Availability);
+            sb.AppendLine();
+            sb.AppendLine("Function routes (metadata, NOT write authorization):");
+            foreach (var route in snapshot.FunctionRoutes.OrderBy(x => x.FunctionId).ThenBy(x => x.Protocol))
+                sb.AppendLine("  " + route.FunctionId + " | " + route.Protocol +
+                    " | " + route.Status + " | R/W/E=" +
+                    Permission(route.CanRead) + "/" + Permission(route.CanWrite) +
+                    "/" + Permission(route.CanExecute));
+            sb.AppendLine();
+            sb.AppendLine("The receiver address is " + (includeHost ? "included by request." : "excluded."));
+            sb.AppendLine("MAC addresses and serial numbers are never included in this report.");
+            sb.AppendLine("Please review before sharing. No automatic transmission is performed.");
+            return sb.ToString();
         }
 
         private async void BtnConnect_Click(object sender, RoutedEventArgs e)
@@ -275,6 +435,25 @@ namespace YamahaAvrNet.TesterGui
                         : pattern
                             ? "Use a pattern reported by your receiver. Reads do not alter settings."
                             : "Commands read device information only.";
+            if (_german && TxtCommandHint != null)
+            {
+                TxtCommandHint.Text = soundCommand
+                    ? (write
+                        ? "Sound-/Scene-Schreibzugriffe brauchen Freigabe vor dem Verbinden und eine Bestätigung. " +
+                          "Soundprogramme nutzen native Extended-Control-IDs. Scenes lassen sich nicht vollständig durch Readback prüfen."
+                        : "Soundstatus, unterstützte Soundprogramme und Scene-Anzahl der ausgewählten Zone lesen.")
+                    : zoneCommand
+                        ? (write
+                            ? "YNCA-Schreibbefehle ändern den Receiver. Freigabe, Prüfung der Gerätewerte, Bestätigung und Readback erforderlich."
+                            : "Erkannte Zonenwerte lesen; fehlende Werte bleiben unbekannt.")
+                        : write
+                            ? "Begrenzter Schreibbereich: RX-A3060 FW 2.86, aktives Pattern 1, nur Front_L. " +
+                              (command.Key == "set-level" ? "Erlaubt: 0.0 oder 0.5 dB. " : "Erlaubt: 2.95 oder 3.00 m. ") +
+                              "Freigabe vor dem Verbinden und Bestätigung sind nötig."
+                            : pattern
+                                ? "Nur vom Receiver gemeldete Patterns eingeben. Lesen ändert keine Einstellungen."
+                                : "Diese Aktion liest ausschließlich Geräteinformationen.";
+            }
             bool yncaCustom = command != null && command.Key == "ynca-custom";
             LblYncaSubunit.Visibility = yncaCustom ? Visibility.Visible : Visibility.Collapsed;
             TxtYncaSubunit.Visibility = yncaCustom ? Visibility.Visible : Visibility.Collapsed;
@@ -285,6 +464,8 @@ namespace YamahaAvrNet.TesterGui
 
         private async void LstCommands_MouseDoubleClick(object sender, MouseButtonEventArgs e)
         {
+            var selected = LstCommands.SelectedItem as TesterCommand;
+            if (selected == null || selected.RequiresValue) return;
             await ExecuteSelectedAsync();
         }
 
@@ -929,6 +1110,12 @@ namespace YamahaAvrNet.TesterGui
             BtnRefresh.IsEnabled = !_busy && _receiver != null;
             BtnDisconnect.IsEnabled = !_busy && _receiver != null;
             BtnSend.IsEnabled = !_busy && _receiver != null && LstCommands.SelectedItem != null;
+            BtnCompatibility.IsEnabled = !_busy && _receiver != null;
+            BtnOpenWebPage.IsEnabled = !_busy;
+            TglEnglish.IsEnabled = !_busy;
+            TglGerman.IsEnabled = !_busy;
+            TxtCommandSearch.IsEnabled = !_busy;
+            BtnClearSearch.IsEnabled = !_busy;
             TxtHost.IsEnabled = !_busy;
             TxtPort.IsEnabled = !_busy;
             TxtYncaPort.IsEnabled = !_busy && _receiver == null;
@@ -993,6 +1180,8 @@ namespace YamahaAvrNet.TesterGui
             internal TesterCommand(string group, string name, string key, bool requiresPattern = false,
                 bool requiresValue = false)
             {
+                EnglishGroup = group;
+                EnglishName = name;
                 Group = group;
                 Name = name;
                 Key = key;
@@ -1000,6 +1189,14 @@ namespace YamahaAvrNet.TesterGui
                 RequiresValue = requiresValue;
             }
 
+            internal void ApplyLanguage(bool german)
+            {
+                Group = GuiText.Get(EnglishGroup, german);
+                Name = GuiText.Get(EnglishName, german);
+            }
+
+            public string EnglishGroup { get; private set; }
+            public string EnglishName { get; private set; }
             public string Group { get; private set; }
             public string Name { get; private set; }
             public string Key { get; private set; }

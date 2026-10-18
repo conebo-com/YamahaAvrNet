@@ -166,3 +166,15 @@ write permission or resend a PUT.
 **Verification status:** the 6.2 changes have not been compiled with Visual
 Studio or tested through a real network interruption on the RX-A3060. A
 receiver-specific test is required before declaring reconnect fully verified.
+
+
+## Phase 6.3 tester compatibility report
+
+The manual WPF tester can export an **existing discovery snapshot** to a local
+TXT compatibility report, following the DenonMarantz tester pattern. It is
+not a hardware conformance test: it does not actively probe additional YNCA
+commands or revalidate historical write observations. Function routes still
+distinguish advertised, implemented and read- or write-verified operations.
+The exported report excludes host/IP by default and does not contain device
+MAC addresses or serial numbers; the host/IP can be added only by explicit
+user choice. Reports are not uploaded or transmitted by YamahaAvrNet.

@@ -286,3 +286,14 @@ After reconnect, unobserved fields remain unknown rather than inheriting
 pre-disconnect values as if they were freshly confirmed. Receiver-level
 notifications are batched per poll to avoid field-by-field event bursts.
 No background write operations or implicit retries of PUT commands exist.
+
+
+## WPF tester protocol displays (Phase 6.3)
+
+The three-pane WPF tester intentionally resembles DenonMarantzAvrNet's manual
+command browser. The HTTP pane displays **application-level summaries**;
+it is **not** a capture of raw request/response headers or payloads. YNCA
+output contains actual messages received by the single shared TCP session.
+Neither changing the GUI language nor generating a compatibility report
+changes receiver protocol state. Reports are based on the already available
+local discovery snapshot and do not authorize unsupported writes.

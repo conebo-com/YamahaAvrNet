@@ -1,0 +1,33 @@
+<Window x:Class="YamahaAvrNet.TesterGui.CompatibilityReportWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Receiver compatibility report" Width="940" Height="700"
+        MinWidth="660" MinHeight="450" WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Border Grid.Row="0" Background="#E8F1FB" BorderBrush="#2F6DB5"
+                BorderThickness="1" CornerRadius="4" Padding="12,9" Margin="0,0,0,8">
+            <TextBlock x:Name="TxtExplanation" TextWrapping="Wrap"
+                       Text="This report summarizes locally available receiver discovery data. It sends no commands and is never uploaded automatically. Review the content before sharing it."/>
+        </Border>
+        <CheckBox Grid.Row="1" x:Name="ChkIncludeHost" Margin="0,0,0,8"
+                  Content="Include receiver hostname/IP address (off by default)"
+                  Checked="ChkIncludeHost_Changed" Unchecked="ChkIncludeHost_Changed"/>
+        <TextBox Grid.Row="2" x:Name="TxtReport" FontFamily="Consolas" IsReadOnly="True"
+                 TextWrapping="NoWrap" AcceptsReturn="True"
+                 HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"/>
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button x:Name="BtnCopy" Content="Copy report" Padding="14,5" Click="BtnCopy_Click"/>
+            <Button x:Name="BtnSave" Content="Save as TXT..." Padding="14,5" Margin="8,0,0,0"
+                    Click="BtnSave_Click"/>
+            <Button x:Name="BtnClose" Content="Close" Padding="14,5" Margin="8,0,0,0"
+                    IsCancel="True" Click="BtnClose_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
