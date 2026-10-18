@@ -34,7 +34,7 @@ namespace YamahaAvrNet.Sample
 
         private static async Task<int> RunAsync()
         {
-            Console.WriteLine("YamahaAvrNet - receiver information and speaker settings");
+            Console.WriteLine("YamahaAvrNet - receiver discovery, speaker settings and monitoring");
             Console.WriteLine("Read-only: no receiver settings will be changed.");
             Console.WriteLine();
 
@@ -182,6 +182,7 @@ namespace YamahaAvrNet.Sample
 
                 if (!Confirm("Read legacy XML speaker settings? [y/N]: "))
                 {
+                    await ReadMonitoringAsync(receiver);
                     await ReadYncaAsync(receiver);
                     return 0;
                 }
@@ -215,9 +216,45 @@ namespace YamahaAvrNet.Sample
                     }
                     await DisplayPatternAsync(receiver, pattern);
                 }
+                await ReadMonitoringAsync(receiver);
                 await ReadYncaAsync(receiver);
             }
             return 0;
+        }
+
+        private static async Task ReadMonitoringAsync(YamahaAvrClient receiver)
+        {
+            Console.WriteLine();
+            if (!Confirm("Monitor read-only state (30 s polls; Enter to stop)? [y/N]: ")) return;
+            EventHandler<YamahaMonitorPollEventArgs> poll = (sender, e) =>
+            {
+                Console.WriteLine("Monitor at " + e.ObservedUtc.ToString("HH:mm:ss", CultureInfo.InvariantCulture) +
+                    " UTC: successful read paths=" + e.SuccessfulReads +
+                    (string.IsNullOrEmpty(e.Error) ? "" : " | partial failures=" + e.Error));
+            };
+            EventHandler<YamahaZoneStateChangedEventArgs> zoneChanged = (sender, e) =>
+            {
+                var z = e.State;
+                Console.WriteLine("  " + z.NativeId + ": power=" + ShowBool(z.IsPoweredOn) +
+                    " volume=" + Show(z.VolumeDb) + " dB" +
+                    " mute=" + ShowBool(z.IsMuted) + " input=" + Show(z.InputNativeId) +
+                    (z.IsStale ? " [stale]" : ""));
+            };
+            receiver.Monitor.PollCompleted += poll;
+            if (receiver.ZoneControl != null) receiver.ZoneControl.ZoneStateChanged += zoneChanged;
+            try
+            {
+                receiver.Monitor.Start(TimeSpan.FromSeconds(30));
+                Console.WriteLine("Read-only monitor started. Press Enter to stop.");
+                Console.ReadLine();
+            }
+            finally
+            {
+                await receiver.Monitor.StopAsync();
+                receiver.Monitor.PollCompleted -= poll;
+                if (receiver.ZoneControl != null) receiver.ZoneControl.ZoneStateChanged -= zoneChanged;
+                Console.WriteLine("Monitoring stopped.");
+            }
         }
 
         private static async Task ReadYncaAsync(YamahaAvrClient receiver)
@@ -384,6 +421,11 @@ namespace YamahaAvrNet.Sample
         private static string Show(string value)
         {
             return string.IsNullOrWhiteSpace(value) ? "unknown" : value;
+        }
+
+        private static string Show(decimal? value)
+        {
+            return value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : "unknown";
         }
 
         private static string Show(int? value)

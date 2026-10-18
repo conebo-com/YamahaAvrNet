@@ -7,6 +7,7 @@ using YamahaAvrNet.Exceptions;
 using YamahaAvrNet.Features.SpeakerSetup;
 using YamahaAvrNet.Features.Audio;
 using YamahaAvrNet.Features.Zones;
+using YamahaAvrNet.Monitoring;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.Protocols.ExtendedControl;
 using YamahaAvrNet.Protocols.LegacyXml;
@@ -58,6 +59,13 @@ namespace YamahaAvrNet.PublicApi
         private DateTimeOffset? _lastUpdatedUtc;
         private bool _stale = true;
         private volatile bool _disposed;
+        private YamahaReceiverState _lastPublishedState;
+
+        /// <summary>A new immutable receiver snapshot was observed; events never grant write access.</summary>
+        public event EventHandler<YamahaReceiverStateChangedEventArgs> ReceiverStateChanged;
+
+        /// <summary>Explicitly started, read-only polling and YNCA event-based monitoring.</summary>
+        public YamahaReceiverMonitor Monitor { get; private set; }
 
         public YamahaAvrClient(YamahaAvrOptions options)
         {
@@ -80,6 +88,10 @@ namespace YamahaAvrNet.PublicApi
                 _yncaSession, () => DeviceFeatures, () => Zones,
                 () => _disposed, _options.EnableYncaZoneWrites, RecordVerifiedWrite);
             ZoneControl = _zoneController;
+            if (_zoneController != null)
+                _zoneController.ZoneStateChanged += ZoneStateChanged;
+            if (_yncaSession != null)
+                _yncaSession.ConnectionChanged += SessionConnectionChanged;
             // The native YNCA DSP reader also works on receivers without Extended Control.
             Sound = _extendedHttp == null && _yncaSession == null ? null : new YamahaSoundController(
                 _extendedHttp, _yncaSession, () => DeviceFeatures,
@@ -92,6 +104,7 @@ namespace YamahaAvrNet.PublicApi
                 RecordSpeakerRead, RecordVerifiedWrite, () => Model,
                 () => DeviceInfo == null ? null : DeviceInfo.SystemVersion,
                 _options.EnableVerifiedSpeakerWrites);
+            Monitor = new YamahaReceiverMonitor(this);
         }
 
         public string Host { get { return _options.Host; } }
@@ -259,6 +272,8 @@ namespace YamahaAvrNet.PublicApi
         public async Task InitializeAsync(CancellationToken cancellationToken = default(CancellationToken))
         {
             EnsureNotDisposed();
+            if (Monitor.IsRunning)
+                throw new InvalidOperationException("Stop monitoring before full protocol rediscovery.");
             await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -267,10 +282,12 @@ namespace YamahaAvrNet.PublicApi
                 try
                 {
                     await ReadInitializationAsync(cancellationToken).ConfigureAwait(false);
+                    PublishStateSnapshot();
                 }
                 catch
                 {
                     MarkFailure();
+                    PublishStateSnapshot();
                     throw;
                 }
             }
@@ -281,6 +298,8 @@ namespace YamahaAvrNet.PublicApi
         public async Task RefreshAsync(CancellationToken cancellationToken = default(CancellationToken))
         {
             EnsureNotDisposed();
+            if (Monitor.IsRunning && (_extendedHttp == null || _features == null || _deviceInfo == null))
+                throw new InvalidOperationException("Stop monitoring before full protocol rediscovery.");
             await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -299,18 +318,29 @@ namespace YamahaAvrNet.PublicApi
                             _connectionState = YamahaConnectionState.Connected;
                             _capabilities = BuildCapabilities(_deviceInfo, _features, status);
                         }
+                        PublishStateSnapshot();
                     }
                     catch
                     {
                         MarkFailure();
+                        PublishStateSnapshot();
                         throw;
                     }
                 }
                 else
                 {
                     SetConnectionState(YamahaConnectionState.Connecting);
-                    try { await ReadInitializationAsync(cancellationToken).ConfigureAwait(false); }
-                    catch { MarkFailure(); throw; }
+                    try
+                    {
+                        await ReadInitializationAsync(cancellationToken).ConfigureAwait(false);
+                        PublishStateSnapshot();
+                    }
+                    catch
+                    {
+                        MarkFailure();
+                        PublishStateSnapshot();
+                        throw;
+                    }
                 }
             }
             finally { _lifecycleGate.Release(); }
@@ -359,6 +389,7 @@ namespace YamahaAvrNet.PublicApi
                 _speakerVerifiedReads.Clear();
                 _yncaVerifiedReads.Clear();
                 _capabilities = new YamahaDeviceCapabilities(new YamahaCapability[0]);
+                _lastPublishedState = null;
                 SetInitialProtocolStates();
             }
             int success = 0;
@@ -563,7 +594,7 @@ namespace YamahaAvrNet.PublicApi
             {
                 _capabilities = BuildCapabilities(_deviceInfo, _features, _functionStatus);
                 _lastUpdatedUtc = DateTimeOffset.UtcNow;
-                _stale = success == 0;
+                _stale = success == 0 || (_deviceInfo == null && _yncaSession != null && !_yncaSession.IsConnected);
                 _connectionState = success == 0 ? YamahaConnectionState.Faulted :
                     failures > 0 ? YamahaConnectionState.PartiallyConnected : YamahaConnectionState.Connected;
             }
@@ -575,6 +606,8 @@ namespace YamahaAvrNet.PublicApi
         public async Task DisconnectAsync(CancellationToken cancellationToken = default(CancellationToken))
         {
             EnsureNotDisposed();
+            // Stop first so polling cannot reopen YNCA after an explicit disconnect.
+            await Monitor.StopAsync().ConfigureAwait(false);
             await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -587,6 +620,7 @@ namespace YamahaAvrNet.PublicApi
                     _connectionState = YamahaConnectionState.Disconnected;
                     _stale = true;
                 }
+                PublishStateSnapshot();
             }
             finally { _lifecycleGate.Release(); }
         }
@@ -621,6 +655,92 @@ namespace YamahaAvrNet.PublicApi
                 _connectionState = _deviceInfo != null
                     ? YamahaConnectionState.PartiallyConnected : YamahaConnectionState.Faulted;
             }
+        }
+
+        /// <summary>Used by the opt-in monitor when all polling paths fail.</summary>
+        internal void MarkMonitoringFailure()
+        {
+            if (_disposed) return;
+            MarkFailure();
+            PublishStateSnapshot();
+        }
+
+        /// <summary>At least one enabled status path returned a fresh observation.</summary>
+        internal void MarkMonitoringSuccess()
+        {
+            if (_disposed) return;
+            lock (_stateSync)
+            {
+                _stale = false;
+                _lastUpdatedUtc = DateTimeOffset.UtcNow;
+                _connectionState = YamahaConnectionState.Connected;
+            }
+            PublishStateSnapshot();
+        }
+
+        /// <summary>A partial read is observable without invalidating successful zone values.</summary>
+        internal void MarkMonitoringPartial()
+        {
+            if (_disposed) return;
+            lock (_stateSync)
+            {
+                _stale = true;
+                _connectionState = YamahaConnectionState.PartiallyConnected;
+            }
+            PublishStateSnapshot();
+        }
+
+        private void ZoneStateChanged(object sender, YamahaZoneStateChangedEventArgs args)
+        {
+            PublishStateSnapshot();
+        }
+
+        private void SessionConnectionChanged(object sender, YamahaYncaConnectionEventArgs args)
+        {
+            // The HTTP path may be healthy; only YNCA-observed zones become stale.
+            PublishStateSnapshot();
+        }
+
+        /// <summary>
+        /// Publish only new snapshot content. Incoming YNCA events, polling and explicit
+        /// RefreshAsync all use this same notification; handlers run outside locks.
+        /// </summary>
+        internal void PublishStateSnapshot()
+        {
+            if (_disposed) return;
+            var handler = ReceiverStateChanged;
+            if (handler == null) return;
+            YamahaReceiverState state = GetState();
+            lock (_stateSync)
+            {
+                if (SameState(_lastPublishedState, state)) return;
+                _lastPublishedState = state;
+            }
+            var args = new YamahaReceiverStateChangedEventArgs(state);
+            foreach (EventHandler<YamahaReceiverStateChangedEventArgs> subscriber in handler.GetInvocationList())
+                try { subscriber(this, args); }
+                catch { /* Callbacks cannot terminate the protocol reader. */ }
+        }
+
+        private static bool SameState(YamahaReceiverState old, YamahaReceiverState next)
+        {
+            if (old == null) return false;
+            if (old.ConnectionState != next.ConnectionState ||
+                old.IsStale != next.IsStale || old.LastUpdatedUtc != next.LastUpdatedUtc ||
+                !string.Equals(old.Model, next.Model, StringComparison.Ordinal) ||
+                old.Zones.Count != next.Zones.Count) return false;
+            foreach (var item in next.Zones)
+            {
+                YamahaZoneState prev;
+                if (!old.Zones.TryGetValue(item.Key, out prev)) return false;
+                var current = item.Value;
+                if (prev.IsPoweredOn != current.IsPoweredOn || prev.VolumeDb != current.VolumeDb ||
+                    prev.IsMuted != current.IsMuted || prev.IsStale != current.IsStale ||
+                    prev.ObservedUtc != current.ObservedUtc ||
+                    !string.Equals(prev.InputNativeId, current.InputNativeId, StringComparison.Ordinal))
+                    return false;
+            }
+            return true;
         }
 
         private void SetConnectionState(YamahaConnectionState value)
@@ -790,7 +910,11 @@ namespace YamahaAvrNet.PublicApi
         {
             if (_disposed)
                 return;
+            // First cancel polling while its transports are still valid.
+            if (Monitor != null) Monitor.Dispose();
             _disposed = true;
+            if (_zoneController != null) _zoneController.ZoneStateChanged -= ZoneStateChanged;
+            if (_yncaSession != null) _yncaSession.ConnectionChanged -= SessionConnectionChanged;
             if (_extendedHttp != null)
                 _extendedHttp.Dispose();
             if (_legacyXml != null)

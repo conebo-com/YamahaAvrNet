@@ -63,6 +63,7 @@ namespace YamahaAvrNet.Features.Zones
             string subunit = RequireZone(nativeZoneId).ToUpperInvariant();
             foreach (string field in ReadFields)
             {
+                if (!IsReadAdvertised(subunit, field)) continue;
                 try
                 {
                     await _session.GetAsync(subunit, field, cancellationToken).ConfigureAwait(false);
@@ -82,6 +83,22 @@ namespace YamahaAvrNet.Features.Zones
                 return _states.TryGetValue(subunit, out result)
                     ? result : new YamahaZoneState(subunit, null, null, null, null, null, !_session.IsConnected);
             }
+        }
+
+        private bool IsReadAdvertised(string subunit, string field)
+        {
+            var metadata = _features();
+            if (metadata == null) return true; // YNCA-only receivers need safe probes.
+            var zone = metadata.Zones.FirstOrDefault(x =>
+                string.Equals(x.NativeId, subunit, StringComparison.OrdinalIgnoreCase));
+            if (zone == null) return false;
+            // Avoid repeated calls for absent zone functions, especially Zone 4
+            // on RX-A3060 which does not advertise volume or mute.
+            string native = field == "PWR" ? "power" : field == "VOL" ? "volume" :
+                field == "MUTE" ? "mute" : "input";
+            if (field == "INP" && zone.Inputs.Count > 0) return true;
+            return zone.Functions.Any(x => string.Equals(x, native,
+                StringComparison.OrdinalIgnoreCase));
         }
 
         public Task SetPowerAsync(string nativeZoneId, bool on,

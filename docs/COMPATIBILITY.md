@@ -61,7 +61,8 @@ A rejected request is not proof that an entire feature is unsupported. For examp
 | Legacy XML speaker levels and distances (aggregate GET) | Yes | Yes: 13 channels for both Pattern 1 and 2 |
 | YNCA TCP GETs and unsolicited status notifications | Yes (Phase 4.1) | Yes: main-zone GET observations on RX-A3060 |
 | Typed YNCA zone PUT with readback | Yes, manual opt-in (Phase 4.2) | User-reported GUI success on RX-A3060; per-zone details unavailable |
-| YNCA keepalive and continuous background reconnect | No | No |
+| Optional read-only polling / reconnect on subsequent YNCA GET | Yes (Phase 5.6, explicit Start) | Not yet tested with the Phase 5.6 build |
+| Automatic monitoring at library startup / dedicated keepalive | No | No |
 
 See [Protocol reference](PROTOCOLS.md) and [Speaker setup](SPEAKER_SETUP.md) for request formats and channel semantics.
 
@@ -120,3 +121,19 @@ executed on that receiver; other models are not implied to support them.
 YNCA `3DCINEMA`/`ADAPTIVEDSP` reads are optional and their availability is
 unknown until the specific unit responds. The rest of the multi-protocol
 discovery and speaker-safety constraints are unchanged.
+
+### Phase 5.5 hardware confirmation and Phase 5.6 monitoring
+
+On the RX-A3060 (firmware 2.86), Phase 5.5 read-only console observations
+confirmed `MAIN:3DCINEMA=Auto` and `MAIN:ADAPTIVEDSP=Auto`, with stored
+`MAIN:SOUNDPRG=Sci-Fi`, Straight Off, Pure Direct Off and Enhancer Off.
+Extended Control `getSignalInfo` returned `response_code=0`, `audio.error=0`,
+but an empty `audio.format` and `audio.fs` while no signal was playing.
+These fields should remain **unknown**, not inferred from prior DSP settings.
+
+Phase 5.6 implements explicit read-only HTTP/YNCA monitoring, read-only zone
+function filtering using the receiver's feature list, independent per-zone
+staleness and caller-facing state/poll events. The new monitoring behavior has
+not yet been verified against a physical receiver or compiled on Windows.
+Other Yamaha models are not automatically considered compatible solely because
+they share a protocol family. Read-only polling grants no write permissions.

@@ -375,3 +375,53 @@ introduced in this phase.
 The console sample and tester GUI include manual audio-signal, decoder-list
 and native DSP inspection. No audio playback is necessary for connectivity
 testing. No new model profile or dependency on AvrDispatcher is introduced.
+
+## Opt-in read-only receiver monitoring (Phase 5.6)
+
+The receiver is **not** monitored automatically. Applications can start one
+read-only monitoring loop after a successful `InitializeAsync()`. It uses the
+existing YNCA TCP session (never a second YNCA connection), including spontaneous
+updates, and the independent Extended Control `getFuncStatus` endpoint when
+available. It avoids polling functions not advertised for a zone by Extended
+Control; for example, RX-A3060 Zone 4 does not advertise volume or mute.
+
+```csharp
+using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
+{
+    Host = "192.168.1.50"
+}))
+{
+    await receiver.InitializeAsync();
+    receiver.ReceiverStateChanged += (sender, args) =>
+        Console.WriteLine("Receiver: " + args.State.ConnectionState +
+            ", stale: " + args.State.IsStale);
+    receiver.Monitor.PollCompleted += (sender, args) =>
+        Console.WriteLine("Read paths: " + args.SuccessfulReads +
+            ", errors: " + (args.Error ?? "none"));
+    receiver.Monitor.Start(TimeSpan.FromSeconds(30));
+    Console.ReadLine();
+    await receiver.Monitor.StopAsync();
+    await receiver.DisconnectAsync();
+}
+```
+
+The monitor requires a 5-second to 1-hour polling interval; a 30-second
+cadence is the sample and GUI default. Complete read failures use bounded
+backoff (up to 180 seconds); a partial failure reports errors without losing
+successful observations. YNCA zones carry their own `IsStale` indicators on
+connection loss, while the global receiver state describes overall discovery
+and HTTP freshness. A successful GET does not imply a writable feature.
+
+`YamahaAvrNet.Sample` offers an interactive read-only monitoring session after
+its speaker questions; press Enter to stop. The WPF command browser exposes
+**Monitoring → Start read-only monitoring**, **Stop read-only monitoring** and
+**Show receiver state snapshot**. Manual YNCA disconnect also stops polling.
+No autonomous status writes, command retries or separate monitoring process are
+created. Monitoring is not a replacement for an always-connected hardware
+availability probe or a periodic audio-signal check.
+
+**Validation:** The Phase 5.6 implementation is awaiting a Windows `net48`
+build and hardware test. Previous RX-A3060 console output confirmed read-only
+advanced DSP `3DCINEMA=Auto` and `ADAPTIVEDSP=Auto`. Without playback,
+`getSignalInfo` returned `response_code=0` and `audio.error=0`, with unknown
+format and sample rate. This is not evidence of any particular input codec.

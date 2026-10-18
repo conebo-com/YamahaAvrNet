@@ -258,3 +258,19 @@ verified speaker XML commands or other legacy features.
   `3DCINEMA`, `ADAPTIVEDSP`: optional read-only snapshot. UNDEFINED and
   RESTRICTED are recorded without treating the entire Yamaha device as
   unsupported. `SOUNDPRG` and effective mode are not interchangeable.
+
+## Read-only monitoring (Phase 5.6)
+
+`YamahaReceiverMonitor` is an opt-in, in-process polling loop. It refreshes
+Extended Control function status where available, reads only discovered YNCA
+zones via the existing serialized TCP session and observes unsolicited YNCA
+updates. Polling operations are GET-only. The published receiver snapshot
+contains the latest observed zone values with independent `IsStale` flags;
+unknown properties remain null. One unavailable protocol cannot prevent
+best-effort reads through another, and partial failures are reported.
+
+When the receiver advertises per-zone functions, zone polling skips functions
+that are absent from its advertised list (for instance, Zone 4 volume/mute on
+the RX-A3060). For YNCA-only receivers lacking Extended Control metadata,
+individual known GETs remain exploratory reads and do not imply write support.
+Polling is manual opt-in and stops on explicit receiver disconnect/disposal.

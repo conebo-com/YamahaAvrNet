@@ -35,6 +35,9 @@ namespace YamahaAvrNet.TesterGui
                 new TesterCommand("Overview", "Available zones and sources", "zones"),
                 new TesterCommand("Overview", "Capabilities and evidence", "capabilities"),
                 new TesterCommand("Overview", "Function routes and legacy description", "function-routes"),
+                new TesterCommand("Monitoring", "Start read-only monitoring (30 s)", "monitor-start"),
+                new TesterCommand("Monitoring", "Stop read-only monitoring", "monitor-stop"),
+                new TesterCommand("Monitoring", "Show receiver state snapshot", "monitor-state"),
                 new TesterCommand("Speaker Setup", "Read active speaker pattern", "active"),
                 new TesterCommand("Speaker Setup", "Read all advertised patterns", "patterns"),
                 new TesterCommand("Speaker Setup", "Read speaker levels", "levels", true),
@@ -73,8 +76,12 @@ namespace YamahaAvrNet.TesterGui
 
         private async void BtnConnect_Click(object sender, RoutedEventArgs e)
         {
-            if (_busy)
+            if (_busy) return;
+            if (_receiver != null)
+            {
+                AppendResult("Disconnect the existing receiver before connecting another session.");
                 return;
+            }
             int port;
             if (!int.TryParse(TxtPort.Text.Trim(), NumberStyles.None,
                     CultureInfo.InvariantCulture, out port) || port < 1 || port > 65535)
@@ -115,11 +122,17 @@ namespace YamahaAvrNet.TesterGui
                     old.Ynca.ConnectionChanged -= ReceiverYnca_ConnectionChanged;
                 }
                 _receiver = next;
+                _receiver.ReceiverStateChanged += Receiver_StateChanged;
+                _receiver.Monitor.PollCompleted += ReceiverMonitor_PollCompleted;
                 _receiver.Ynca.MessageReceived += ReceiverYnca_MessageReceived;
                 _receiver.Ynca.ConnectionChanged += ReceiverYnca_ConnectionChanged;
                 next = null;
                 if (old != null)
+                {
+                    old.ReceiverStateChanged -= Receiver_StateChanged;
+                    old.Monitor.PollCompleted -= ReceiverMonitor_PollCompleted;
                     old.Dispose();
+                }
                 TxtConnectionStatus.Text = "Connected: " + Show(_receiver.Model);
                 AppendResult(BuildSummary());
             }
@@ -150,9 +163,11 @@ namespace YamahaAvrNet.TesterGui
             finally { EndOperation(); }
         }
 
-        private void BtnYncaDisconnect_Click(object sender, RoutedEventArgs e)
+        private async void BtnYncaDisconnect_Click(object sender, RoutedEventArgs e)
         {
             if (_busy || _receiver == null || _receiver.Ynca == null) return;
+            // Otherwise the next poll would reopen a deliberately closed session.
+            if (_receiver.Monitor.IsRunning) await _receiver.Monitor.StopAsync();
             _receiver.Ynca.Disconnect();
             AppendResult("YNCA session closed. HTTP discovery remains available.");
             UpdateControls();
@@ -210,6 +225,8 @@ namespace YamahaAvrNet.TesterGui
                     _receiver.Ynca.MessageReceived -= ReceiverYnca_MessageReceived;
                     _receiver.Ynca.ConnectionChanged -= ReceiverYnca_ConnectionChanged;
                 }
+                _receiver.ReceiverStateChanged -= Receiver_StateChanged;
+                _receiver.Monitor.PollCompleted -= ReceiverMonitor_PollCompleted;
                 _receiver.Dispose();
                 _receiver = null;
                 TxtConnectionStatus.Text = "Not connected";
@@ -369,6 +386,17 @@ namespace YamahaAvrNet.TesterGui
                 }
                 switch (command.Key)
                 {
+                    case "monitor-start":
+                        _receiver.Monitor.Start(TimeSpan.FromSeconds(30));
+                        AppendResult("Read-only monitor started (30 s). YNCA TCP uses the existing shared session.");
+                        break;
+                    case "monitor-stop":
+                        await _receiver.Monitor.StopAsync();
+                        AppendResult("Read-only monitor stopped. Existing YNCA session is not forcibly closed.");
+                        break;
+                    case "monitor-state":
+                        AppendResult(BuildReceiverState());
+                        break;
                     case "zone-status":
                         var zoneState = await _receiver.ZoneControl.RefreshAsync(TxtZone.Text.Trim());
                         AppendResult(FormatZone(zoneState));
@@ -689,6 +717,44 @@ namespace YamahaAvrNet.TesterGui
             }
         }
 
+        private void Receiver_StateChanged(object sender, YamahaReceiverStateChangedEventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_receiver == null || !ReferenceEquals(sender, _receiver)) return;
+                if (_receiver.Monitor.IsRunning)
+                    TxtConnectionStatus.Text = "Monitoring: " + e.State.ConnectionState +
+                        (e.State.IsStale ? " [stale/partial]" : "");
+            }));
+        }
+
+        private void ReceiverMonitor_PollCompleted(object sender, YamahaMonitorPollEventArgs e)
+        {
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (_receiver == null || !ReferenceEquals(sender, _receiver.Monitor)) return;
+                AppendResult("Monitor " + e.ObservedUtc.ToString("HH:mm:ss", CultureInfo.InvariantCulture) +
+                    " UTC: successful read paths=" + e.SuccessfulReads +
+                    (string.IsNullOrEmpty(e.Error) ? "" : " | partial failures: " + e.Error));
+            }));
+        }
+
+        private string BuildReceiverState()
+        {
+            var state = _receiver.GetState();
+            var sb = new StringBuilder();
+            sb.AppendLine("Model: " + Show(state.Model));
+            sb.AppendLine("Connection: " + state.ConnectionState +
+                " | stale: " + state.IsStale);
+            sb.AppendLine("Last update UTC: " + Show(state.LastUpdatedUtc));
+            sb.AppendLine("Monitoring active: " + _receiver.Monitor.IsRunning);
+            sb.AppendLine("Last successful poll: " + Show(_receiver.Monitor.LastSuccessfulPollUtc));
+            sb.AppendLine("Last monitor error: " + Show(_receiver.Monitor.LastError));
+            foreach (var zone in state.Zones.Values.OrderBy(x => x.NativeId))
+                sb.AppendLine(FormatZone(zone));
+            return sb.ToString();
+        }
+
         private string BuildSummary()
         {
             var info = _receiver.DeviceInfo;
@@ -805,6 +871,11 @@ namespace YamahaAvrNet.TesterGui
             return string.IsNullOrWhiteSpace(value) ? "unknown" : value;
         }
 
+        private static string Show(DateTimeOffset? value)
+        {
+            return value.HasValue ? value.Value.ToString("u", CultureInfo.InvariantCulture) : "unknown";
+        }
+
         private static string Show(int? value)
         {
             return value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : "unknown";
@@ -828,7 +899,7 @@ namespace YamahaAvrNet.TesterGui
         {
             if (BtnConnect == null || BtnSend == null)
                 return;
-            BtnConnect.IsEnabled = !_busy;
+            BtnConnect.IsEnabled = !_busy && _receiver == null;
             BtnRefresh.IsEnabled = !_busy && _receiver != null;
             BtnDisconnect.IsEnabled = !_busy && _receiver != null;
             BtnSend.IsEnabled = !_busy && _receiver != null && LstCommands.SelectedItem != null;
@@ -885,6 +956,8 @@ namespace YamahaAvrNet.TesterGui
                     _receiver.Ynca.MessageReceived -= ReceiverYnca_MessageReceived;
                     _receiver.Ynca.ConnectionChanged -= ReceiverYnca_ConnectionChanged;
                 }
+                _receiver.ReceiverStateChanged -= Receiver_StateChanged;
+                _receiver.Monitor.PollCompleted -= ReceiverMonitor_PollCompleted;
                 _receiver.Dispose();
             }
         }
