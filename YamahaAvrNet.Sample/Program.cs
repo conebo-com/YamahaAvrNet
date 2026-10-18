@@ -68,7 +68,14 @@ namespace YamahaAvrNet.Sample
                 foreach (var protocol in receiver.Protocols.Values.OrderBy(x => x.Protocol))
                     Console.WriteLine("  " + protocol.Protocol + ": " + protocol.Availability +
                         (string.IsNullOrEmpty(protocol.Detail) ? "" : " - " + protocol.Detail));
-                Console.WriteLine("Function routes: " + receiver.FunctionRoutes.Count +
+                // The same Yamaha-only read contract can later be consumed by an
+                // AvrDispatcher adapter, without coupling either library to it.
+                IYamahaReceiverInfo receiverInfo = receiver;
+                YamahaReceiverOverview overview = receiverInfo.GetOverview();
+                Console.WriteLine("Receiver overview: " + overview.State.ConnectionState +
+                    ", stale=" + overview.State.IsStale +
+                    ", discovered zones=" + overview.DiscoveredZones.Count);
+                Console.WriteLine("Function routes: " + overview.FunctionRoutes.Count +
                     " (advertised or observed; not proof of write support)");
                 var description = receiver.LegacyDescriptor;
                 Console.WriteLine("Legacy XML description: " +

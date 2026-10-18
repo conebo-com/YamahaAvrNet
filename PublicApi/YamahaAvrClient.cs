@@ -19,7 +19,7 @@ namespace YamahaAvrNet.PublicApi
     /// Independent Yamaha receiver facade. Supports Extended Control discovery
     /// and guarded, explicitly opted-in legacy XML writes for verified RX-A3060 parameters.
     /// </summary>
-    public sealed class YamahaAvrClient : IDisposable
+    public sealed class YamahaAvrClient : IYamahaReceiverInfo, IDisposable
     {
         private static readonly IReadOnlyList<YamahaZoneInfo> EmptyZones =
             Array.AsReadOnly(new YamahaZoneInfo[0]);
@@ -184,6 +184,10 @@ namespace YamahaAvrNet.PublicApi
             if (string.IsNullOrWhiteSpace(functionId))
                 throw new ArgumentException("A function ID is required.", nameof(functionId));
             EnsureNotDisposed();
+            if (operation != YamahaFunctionOperation.Read &&
+                operation != YamahaFunctionOperation.Write &&
+                operation != YamahaFunctionOperation.Execute)
+                throw new ArgumentOutOfRangeException(nameof(operation));
             lock (_stateSync)
             {
                 YamahaFunctionRoute best = null;
@@ -254,9 +258,31 @@ namespace YamahaAvrNet.PublicApi
         {
             EnsureNotDisposed();
             lock (_stateSync)
-                return new YamahaReceiverState(_connectionState, _lastUpdatedUtc,
-                    _stale, _deviceInfo == null ? _yncaModel : _deviceInfo.ModelName,
-                    _zoneController == null ? null : _zoneController.GetStates());
+                return CaptureStateLocked();
+        }
+
+        /// <summary>
+        /// Capture discovery and state metadata together, without contacting the AVR.
+        /// No locks or mutable collection instances escape to the caller. Reading this
+        /// snapshot never enables writes or refreshes any protocol.
+        /// </summary>
+        public YamahaReceiverOverview GetOverview()
+        {
+            EnsureNotDisposed();
+            lock (_stateSync)
+            {
+                return new YamahaReceiverOverview(CaptureStateLocked(), _zones,
+                    _protocols, _capabilities.All, _functionRoutes, DateTimeOffset.UtcNow);
+            }
+        }
+
+        // Caller must hold _stateSync. The zone controller returns its own copied
+        // dictionary; it raises its events only after leaving its internal lock.
+        private YamahaReceiverState CaptureStateLocked()
+        {
+            return new YamahaReceiverState(_connectionState, _lastUpdatedUtc,
+                _stale, _deviceInfo == null ? _yncaModel : _deviceInfo.ModelName,
+                _zoneController == null ? null : _zoneController.GetStates());
         }
 
         /// <summary>

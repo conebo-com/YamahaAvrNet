@@ -30,6 +30,7 @@ namespace YamahaAvrNet.TesterGui
             var commands = new List<TesterCommand>
             {
                 new TesterCommand("Overview", "Receiver summary", "summary"),
+                new TesterCommand("Overview", "Read-only integration overview", "api-overview"),
                 new TesterCommand("Overview", "Protocol discovery results", "protocols"),
                 new TesterCommand("Overview", "Refresh function status", "refresh"),
                 new TesterCommand("Overview", "Available zones and sources", "zones"),
@@ -422,6 +423,9 @@ namespace YamahaAvrNet.TesterGui
                     case "summary":
                         AppendResult(BuildSummary());
                         break;
+                    case "api-overview":
+                        AppendResult(BuildApiOverview());
+                        break;
                     case "refresh":
                         AppendHttp("Refresh: Extended function status or protocol rediscovery");
                         await _receiver.RefreshAsync();
@@ -753,6 +757,28 @@ namespace YamahaAvrNet.TesterGui
             foreach (var zone in state.Zones.Values.OrderBy(x => x.NativeId))
                 sb.AppendLine(FormatZone(zone));
             return sb.ToString();
+        }
+
+        private string BuildApiOverview()
+        {
+            IYamahaReceiverInfo info = _receiver;
+            YamahaReceiverOverview snapshot = info.GetOverview();
+            var result = new StringBuilder();
+            result.AppendLine("Yamaha-specific read-only API overview");
+            result.AppendLine("Captured UTC: " + snapshot.CapturedUtc.ToString("O", CultureInfo.InvariantCulture));
+            result.AppendLine("Model: " + Show(snapshot.State.Model));
+            result.AppendLine("Connection: " + snapshot.State.ConnectionState +
+                " | stale: " + snapshot.State.IsStale);
+            result.AppendLine("Observed state update: " + Show(snapshot.State.LastUpdatedUtc));
+            result.AppendLine("Discovered zones: " + string.Join(", ",
+                snapshot.DiscoveredZones.Select(x => x.NativeId)));
+            result.AppendLine("Known states: " + snapshot.State.Zones.Count +
+                " | capabilities: " + snapshot.Capabilities.Count +
+                " | function routes: " + snapshot.FunctionRoutes.Count);
+            foreach (var probe in snapshot.Protocols.Values.OrderBy(x => x.Protocol))
+                result.AppendLine("  " + probe.Protocol + ": " + probe.Availability);
+            result.AppendLine("This is a snapshot of observed metadata, not a write permission.");
+            return result.ToString();
         }
 
         private string BuildSummary()

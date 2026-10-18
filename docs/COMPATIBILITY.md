@@ -137,3 +137,13 @@ staleness and caller-facing state/poll events. The new monitoring behavior has
 not yet been verified against a physical receiver or compiled on Windows.
 Other Yamaha models are not automatically considered compatible solely because
 they share a protocol family. Read-only polling grants no write permissions.
+
+## API compatibility (Phase 6.1)
+
+`IYamahaReceiverInfo` and `YamahaReceiverOverview` are additive Yamaha-specific
+public APIs. Existing `YamahaAvrClient` methods and typed controllers remain
+unchanged. An external AvrDispatcher can reference YamahaAvrNet and adapt this
+read-only contract without a shared abstractions project or reverse dependency.
+
+Overview timestamps and feature evidence do not establish live device
+connectivity or write support. Individual zone values can remain unknown/stale.

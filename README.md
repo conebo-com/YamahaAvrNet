@@ -26,6 +26,37 @@ YamahaAvrNet has **no dependency on `AvrNet.Abstractions`, `AvrDispatcher`, or D
 
 Cross-manufacturer adapters and common contracts can be designed separately in the future AvrDispatcher project. Such adapters will consume YamahaAvrNet's public API; YamahaAvrNet will not reference AvrDispatcher.
 
+## Phase 6.1: Stable read-only integration surface
+
+The Yamaha-specific `IYamahaReceiverInfo` interface exposes receiver identity,
+state changes, discovered zones, protocol probes, capabilities and native routes.
+`YamahaAvrClient` implements it; **no new assembly or dependency is introduced**.
+The future AvrDispatcher may implement its own manufacturer-neutral adapter
+against this interface, but YamahaAvrNet does not reference that dispatcher.
+
+Use `GetOverview()` when a consumer needs the receiver state and discovery
+metadata from **one local API capture**, instead of combining several separate
+property reads during concurrent YNCA events and HTTP refreshes:
+
+```csharp
+IYamahaReceiverInfo info = receiver;
+YamahaReceiverOverview snapshot = info.GetOverview();
+Console.WriteLine(snapshot.State.ConnectionState);
+Console.WriteLine(snapshot.State.IsStale);
+Console.WriteLine(snapshot.DiscoveredZones.Count);
+Console.WriteLine(snapshot.FunctionRoutes.Count);
+```
+
+The returned collections are immutable copies of the current metadata and
+contain no executable commands. `CapturedUtc` records the local snapshot time,
+**not** the time when every field was observed. Individual zone states retain
+`ObservedUtc` and `IsStale`; unknown values remain null. `GetOverview()` is
+read-only and does not contact the receiver. Previous APIs remain available.
+
+This step does not change YNCA/HTTP writes, the RX-A3060 speaker safeguards,
+or the optional monitoring cadence. A Windows `net48` build and live receiver
+validation are still required for this revision.
+
 ## Requirements and build
 
 - Windows with Visual Studio 2022 **17.13 or later** and the **.NET desktop development** workload.
