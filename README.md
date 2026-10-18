@@ -6,7 +6,7 @@ YamahaAvrNet is an independent C# library for controlling Yamaha AV receivers. I
 **Language baseline:** C# 7.3  
 **License:** MIT (see [LICENSE](LICENSE))
 
-**Current implementation status:** Multi-protocol read-only discovery now works without mandatory Extended Control. `InitializeAsync()` independently probes enabled Extended Control, legacy XML and YNCA; discovered protocol reachability and read evidence are exposed separately. A YNCA-only receiver can expose its observed model and successfully probed zone IDs, but does not gain unverified volume ranges, input lists or write rights. `desc.xml` / `UnitDesc.xml` are now optionally read as incomplete discovery metadata; broad model profiles are not implemented yet. Phase 5.1 additionally exposes sound/DSP status, guarded native sound program selection and scene recall. The RX-A3060 has now confirmed sound/DSP reads via both Extended Control and YNCA; sound/scene writes remain unverified. Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP GETs were successfully observed on the RX-A3060. Phase 4.2 adds typed zone status and optional YNCA power, mute, dB volume and input writes, all guarded by explicit opt-in and readback. The user reports successful manual GUI control on RX-A3060; exact per-zone coverage was not recorded. Active speaker configuration, PEQ, writing other speaker channels and Pattern 2 remain unimplemented. The C# legacy XML PUT implementation also requires hardware verification. Historical RX-A3060 observations are documented separately from software implementation.
+**Current implementation status (Phase 6.4 candidate; final Windows build pending):** Multi-protocol read-only discovery now works without mandatory Extended Control. `InitializeAsync()` independently probes enabled Extended Control, legacy XML and YNCA; discovered protocol reachability and read evidence are exposed separately. A YNCA-only receiver can expose its observed model and successfully probed zone IDs, but does not gain unverified volume ranges, input lists or write rights. `desc.xml` / `UnitDesc.xml` are now optionally read as incomplete discovery metadata; broad model profiles are not implemented yet. Phase 5.1 additionally exposes sound/DSP status, guarded native sound program selection and scene recall. The RX-A3060 has now confirmed sound/DSP reads via both Extended Control and YNCA; sound/scene writes remain unverified. Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP GETs were successfully observed on the RX-A3060. Phase 4.2 adds typed zone status and optional YNCA power, mute, dB volume and input writes, all guarded by explicit opt-in and readback. The user reports successful manual GUI control on RX-A3060; exact per-zone coverage was not recorded. Active speaker configuration, PEQ, writing other speaker channels and Pattern 2 remain unimplemented. The C# legacy XML PUT implementation also requires hardware verification. Historical RX-A3060 observations are documented separately from software implementation.
 
 ## Solution and projects
 
@@ -510,3 +510,44 @@ This GUI-only phase does not change the core public API, command protocols,
 monitoring behavior, or future AvrDispatcher boundaries. A complete Windows
 `.NET Framework 4.8` build and GUI visual/functional inspection are still
 required; static checks alone are not build or receiver verification.
+
+## Phase 6.4: Release-candidate checklist
+
+This source tree is a **v1.0 candidate**, not a certified production release.
+The previous RX-A3060 console sessions verify normal read-only discovery,
+speaker GETs, sound/DSP status, and routine 30-second monitoring. They do
+**not** validate the exact final binaries, recovery after a broken connection,
+all writes, or any other Yamaha model. The manual YNCA disconnect in the WPF
+tester is now serialized with other UI operations while monitoring stops.
+
+### Windows build and GUI checks
+
+From a **Developer PowerShell for Visual Studio** with the .NET Framework 4.8
+Developer Pack installed, in the repository root:
+
+```powershell
+msbuild .\YamahaAvrNet.slnx /restore /p:Configuration=Debug /v:minimal
+msbuild .\YamahaAvrNet.slnx /restore /p:Configuration=Release /v:minimal
+```
+
+If an older MSBuild cannot open `.slnx`, use Visual Studio 2022 17.13+
+instead of converting the repository to `.sln` or changing the target framework.
+The three projects must build: core library, console sample, and WPF tester.
+
+After building, open the WPF tester and check connection/disconnection,
+EN/DE language switching, filtering/grouping, report preview and TXT export,
+YNCA connect/disconnect, and Start/Stop monitoring. Verify that write commands
+stay disabled by default and require explicit opt-in and a second confirmation.
+No network disruption or receiver settings change is needed for those GUI
+checks; inspect the reported state without a playing audio signal.
+
+For a controlled reconnect check, start read-only monitoring and briefly
+interrupt the receiver's network connection. Confirm stale/partial state,
+`Faulted` or `Reconnecting` when applicable, eventual new observations, and
+that previously cached fields are **not** represented as newly observed.
+Do not change power or speaker settings as part of this validation.
+
+The hardware-evidence matrix and remaining release gates are in
+[Device compatibility](docs/COMPATIBILITY.md). The public API remains Yamaha
+specific so a future **AvrDispatcher** can adapt it externally without any
+reverse project reference.

@@ -61,7 +61,8 @@ A rejected request is not proof that an entire feature is unsupported. For examp
 | Legacy XML speaker levels and distances (aggregate GET) | Yes | Yes: 13 channels for both Pattern 1 and 2 |
 | YNCA TCP GETs and unsolicited status notifications | Yes (Phase 4.1) | Yes: main-zone GET observations on RX-A3060 |
 | Typed YNCA zone PUT with readback | Yes, manual opt-in (Phase 4.2) | User-reported GUI success on RX-A3060; per-zone details unavailable |
-| Optional read-only polling / reconnect on subsequent YNCA GET | Yes (Phase 5.6, explicit Start) | Not yet tested with the Phase 5.6 build |
+| Optional read-only polling | Yes (Phase 5.6, explicit Start) | RX-A3060: four successful 30-second cycles, five successful read paths each |
+| Recovery after a real network interruption | Implemented (Phase 6.2) | Not yet hardware verified |
 | Automatic monitoring at library startup / dedicated keepalive | No | No |
 
 See [Protocol reference](PROTOCOLS.md) and [Speaker setup](SPEAKER_SETUP.md) for request formats and channel semantics.
@@ -72,10 +73,10 @@ See [Protocol reference](PROTOCOLS.md) and [Speaker setup](SPEAKER_SETUP.md) for
 An interactive C# console run on an RX-A3060 (firmware 2.86) successfully opened
 TCP/50000 and observed `SYS:MODELNAME=RX-A3060`, `MAIN:PWR=On`,
 `MAIN:VOL=-36.5`, `MAIN:MUTE=Off`, and `MAIN:INP=AUDIO1`.
-A subsequent explicit `MAIN:VOL` query returned `-36.5` again. These are
-**read observations**, not evidence that the new Phase 4.2 C# PUT path
-works or that any Zone 2/3/4 YNCA commands work. All YNCA zone writes
-remain **not hardware verified** until separately checked.
+A subsequent explicit `MAIN:VOL` query returned `-36.5` again. These are **read observations**, not write validation. In a later GUI session
+(Phase 4.2), the user reported that receiver write controls worked, but did not
+identify which individual operations or zones were tested. Therefore no
+per-command or cross-model write guarantee is recorded.
 
 ### Phase 5.1 sound and scene evidence
 
@@ -109,15 +110,16 @@ or accepted scene actions are recorded for the *current client instance* only.
 The historical limited RX-A3060 speaker write evidence does not authorize writes
 to any other model/firmware/pattern/channel. Phase 5.4 capability routing was exercised on the RX-A3060 FW 2.86:
 142 function routes were displayed, along with successful YNCA and
-Legacy XML reads. A complete Windows build of Phase 5.5 remains pending.
+Legacy XML reads. Phase 5.5 subsequently reported 148 function routes.
+A clean Windows build of the final Phase 6.4 candidate remains pending.
 
 
 ## Phase 5.5 evidence
 
 The RX-A3060 FW 2.86 has advertised `main.signal_info` and a
-`surr_decoder_type_list` in its Extended Control features. The new
-`getSignalInfo` and surround decoder write methods have **not** yet been
-executed on that receiver; other models are not implied to support them.
+`surr_decoder_type_list` in its Extended Control features. The `getSignalInfo` read has subsequently been exercised successfully on
+RX-A3060 (see confirmation below). The surround-decoder **write** path has
+not been hardware verified. Other models are not implied to support either.
 YNCA `3DCINEMA`/`ADAPTIVEDSP` reads are optional and their availability is
 unknown until the specific unit responds. The rest of the multi-protocol
 discovery and speaker-safety constraints are unchanged.
@@ -178,3 +180,27 @@ distinguish advertised, implemented and read- or write-verified operations.
 The exported report excludes host/IP by default and does not contain device
 MAC addresses or serial numbers; the host/IP can be added only by explicit
 user choice. Reports are not uploaded or transmitted by YamahaAvrNet.
+
+## Phase 6.4 release-candidate verification
+
+This revision consolidates the source and existing documentation; it is **not**
+a claim that a final Windows release or multi-model compatibility test has
+passed. The following distinction is essential:
+
+| Check | Evidence | Status |
+| --- | --- | --- |
+| RX-A3060 discovery through three protocols | User-provided console sessions, firmware 2.86 | Observed working |
+| RX-A3060 speaker-pattern levels and distances | User-provided C# console GETs for both patterns | Observed working |
+| RX-A3060 sound and DSP GETs | User-provided Phase 5.5 console run | Observed working |
+| RX-A3060 routine read-only monitoring | Four 30-second cycles, five successful paths each | Observed working with earlier build |
+| Current Phase 6.4 core/sample/WPF compilation | Requires Visual Studio with .NET Framework 4.8 Targeting Pack | Pending |
+| Current GUI localization, reports and safety confirmations | Requires Windows WPF walkthrough | Pending |
+| Reconnect after real network interruption | Requires RX-A3060 network-interruption experiment | Pending |
+| Speaker setup PUT in the current C# implementation | Historically demonstrated command, but not this C# writer | Pending |
+| Sound/scene and surround decoder writes | Opt-in methods implemented, no corresponding user write transcript | Pending |
+| Models other than RX-A3060 | No device-specific live evidence provided | Unknown |
+
+For receiver validation, use reads first. Test writes only after reviewing the
+real hardware and the appropriate opt-in settings; do not automate writes as
+part of detection. A successful build is necessary before applying a v1.0
+release label. No `AvrDispatcher` or `AvrNet.Abstractions` dependency is added.

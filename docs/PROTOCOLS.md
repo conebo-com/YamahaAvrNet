@@ -297,3 +297,16 @@ output contains actual messages received by the single shared TCP session.
 Neither changing the GUI language nor generating a compatibility report
 changes receiver protocol state. Reports are based on the already available
 local discovery snapshot and do not authorize unsupported writes.
+
+## Phase 6.4: Disconnect and verification boundary
+
+The WPF command browser serializes an explicit YNCA disconnect with other UI
+operations while an active monitor is stopped. This prevents overlapping manual
+connect/disconnect operations during an awaited monitoring shutdown; no wire
+commands or receiver write permissions were changed for this step.
+
+A YNCA readback confirms a value observed after a request, but the protocol has
+no request IDs and spontaneous updates can coincide with replies. Legacy XML
+checks the Yamaha `RC` separately from HTTP status; HTTP/JSON responses likewise
+require their native success code. These are protocol evidence boundaries, not
+claims of automatic compatibility with other Yamaha AVR generations.

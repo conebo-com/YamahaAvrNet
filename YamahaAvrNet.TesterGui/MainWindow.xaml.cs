@@ -327,11 +327,23 @@ namespace YamahaAvrNet.TesterGui
         private async void BtnYncaDisconnect_Click(object sender, RoutedEventArgs e)
         {
             if (_busy || _receiver == null || _receiver.Ynca == null) return;
-            // Otherwise the next poll would reopen a deliberately closed session.
-            if (_receiver.Monitor.IsRunning) await _receiver.Monitor.StopAsync();
-            _receiver.Ynca.Disconnect();
-            AppendResult("YNCA session closed. HTTP discovery remains available.");
-            UpdateControls();
+            // An awaited monitoring stop must not race a second GUI command,
+            // receiver disposal, or a new YNCA connect attempt.
+            BeginOperation();
+            var receiver = _receiver;
+            try
+            {
+                // Otherwise the next poll would reopen a deliberately closed session.
+                if (receiver.Monitor.IsRunning)
+                    await receiver.Monitor.StopAsync();
+                receiver.Ynca.Disconnect();
+                AppendResult("YNCA session closed. HTTP discovery remains available.");
+            }
+            catch (Exception ex)
+            {
+                AppendResult("YNCA disconnect failed: " + ex.Message);
+            }
+            finally { EndOperation(); }
         }
 
         private void ReceiverYnca_MessageReceived(object sender, YamahaYncaMessageEventArgs e)
