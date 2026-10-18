@@ -80,7 +80,8 @@ namespace YamahaAvrNet.PublicApi
                 _yncaSession, () => DeviceFeatures, () => Zones,
                 () => _disposed, _options.EnableYncaZoneWrites, RecordVerifiedWrite);
             ZoneControl = _zoneController;
-            Sound = _extendedHttp == null ? null : new YamahaSoundController(
+            // The native YNCA DSP reader also works on receivers without Extended Control.
+            Sound = _extendedHttp == null && _yncaSession == null ? null : new YamahaSoundController(
                 _extendedHttp, _yncaSession, () => DeviceFeatures,
                 () => _disposed, _options.EnableSoundSceneWrites,
                 RecordExtendedRead, RecordVerifiedWrite, RecordAcceptedAction);

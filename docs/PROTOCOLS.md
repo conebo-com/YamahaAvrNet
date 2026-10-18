@@ -238,3 +238,23 @@ argument validation and non-idempotent operation safeguards.
 The optional descriptor probe records HTTP errors, missing files, parsing
 failures and timeouts separately. A missing descriptor cannot invalidate
 verified speaker XML commands or other legacy features.
+
+
+## Audio inspection (Phase 5.5)
+
+- Extended Control `/<zone>/getStatus`: selected native sound-program ID,
+  surround decoder selection, Pure Direct, Enhancer, Direct and optional
+  `surround_3d` (only if returned).
+- Extended Control `/<zone>/getSignalInfo`: Yamaha-native audio format and
+  sampling-frequency **strings**; additional response fields are retained for
+  diagnostics. The endpoint may return empty/unknown values when no signal
+  is present. It does not universally expose channel counts, object metadata,
+  or Atmos/DTS:X decoder internals.
+- Extended Control `/<zone>/setSurroundDecoderType?type=<native-id>`:
+  explicitly opted-in and native-list validated; separate getStatus readback.
+  The Yamaha 2018 reference has a copy/paste discrepancy between the path
+  shown in the URI table and its example. The example path is used here.
+- YNCA MAIN `SOUNDPRG`, `STRAIGHT`, `PUREDIRMODE`, `ENHANCER`,
+  `3DCINEMA`, `ADAPTIVEDSP`: optional read-only snapshot. UNDEFINED and
+  RESTRICTED are recorded without treating the entire Yamaha device as
+  unsupported. `SOUNDPRG` and effective mode are not interchangeable.

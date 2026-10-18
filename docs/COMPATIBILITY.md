@@ -106,5 +106,17 @@ speaker block reads. It separately exposes implemented operations and verified
 permissions. Writes remain disabled by default; successful controller readbacks
 or accepted scene actions are recorded for the *current client instance* only.
 The historical limited RX-A3060 speaker write evidence does not authorize writes
-to any other model/firmware/pattern/channel. Phase 5.4 has not yet been built on
-Windows or exercised on receiver hardware.
+to any other model/firmware/pattern/channel. Phase 5.4 capability routing was exercised on the RX-A3060 FW 2.86:
+142 function routes were displayed, along with successful YNCA and
+Legacy XML reads. A complete Windows build of Phase 5.5 remains pending.
+
+
+## Phase 5.5 evidence
+
+The RX-A3060 FW 2.86 has advertised `main.signal_info` and a
+`surr_decoder_type_list` in its Extended Control features. The new
+`getSignalInfo` and surround decoder write methods have **not** yet been
+executed on that receiver; other models are not implied to support them.
+YNCA `3DCINEMA`/`ADAPTIVEDSP` reads are optional and their availability is
+unknown until the specific unit responds. The rest of the multi-protocol
+discovery and speaker-safety constraints are unchanged.

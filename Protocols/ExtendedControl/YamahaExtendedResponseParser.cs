@@ -110,7 +110,35 @@ namespace YamahaAvrNet.Protocols.ExtendedControl
                 GetBoolean(root, "pure_direct"),
                 GetBoolean(root, "enhancer"),
                 GetBoolean(root, "direct"),
-                GetString(root, "surr_decoder_type"), DateTimeOffset.UtcNow);
+                GetString(root, "surr_decoder_type"), GetBoolean(root, "surround_3d"),
+                DateTimeOffset.UtcNow);
+        }
+
+        internal static YamahaAudioSignalInfo ParseZoneSignalInfo(string json, string zoneNativeId)
+        {
+            JObject root = ReadRoot(json, "getSignalInfo");
+            var audio = root["audio"] as JObject;
+            var audioFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var otherFields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (audio != null)
+                foreach (var field in audio.Properties())
+                    audioFields[field.Name] = field.Value.Type == JTokenType.String
+                        ? (string)field.Value : field.Value.ToString(Formatting.None);
+            foreach (var field in root.Properties())
+                if (!string.Equals(field.Name, "audio", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(field.Name, "response_code", StringComparison.OrdinalIgnoreCase))
+                    otherFields[field.Name] = field.Value.ToString(Formatting.None);
+            return new YamahaAudioSignalInfo(zoneNativeId,
+                GetInteger(audio, "error"),
+                NormalizeUnknown(GetString(audio, "format")),
+                NormalizeUnknown(GetString(audio, "fs")),
+                audioFields, otherFields, DateTimeOffset.UtcNow);
+        }
+
+        private static string NormalizeUnknown(string value)
+        {
+            return string.IsNullOrWhiteSpace(value) || value.Trim() == "---"
+                ? null : value.Trim();
         }
 
         internal static void ValidateCommandResponse(string json, string endpoint)

@@ -52,6 +52,10 @@ namespace YamahaAvrNet.TesterGui
                 new TesterCommand("YNCA / Zones", "Set zone input (native ID)", "zone-set-input", false, true),
                 new TesterCommand("Sound / DSP", "Read YNCA Main DSP status", "sound-ynca"),
                 new TesterCommand("Sound / DSP", "Read zone sound status", "sound-status"),
+                new TesterCommand("Sound / DSP", "Read audio signal information", "sound-signal-info"),
+                new TesterCommand("Sound / DSP", "Read extended YNCA MAIN DSP", "sound-ynca-advanced"),
+                new TesterCommand("Sound / DSP", "Show available decoder types", "sound-decoders"),
+                new TesterCommand("Sound / DSP", "Set surround decoder (native ID)", "sound-set-decoder", false, true),
                 new TesterCommand("Sound / DSP", "Show available sound programs", "sound-programs"),
                 new TesterCommand("Sound / DSP", "Set sound program (native ID)", "sound-set-program", false, true),
                 new TesterCommand("Sound / DSP", "Set Pure Direct (On/Off; MAIN)", "sound-pure-direct", false, true),
@@ -455,6 +459,40 @@ namespace YamahaAvrNet.TesterGui
                     await DisplayYncaGetAsync("MAIN", field);
                 return;
             }
+            if (command.Key == "sound-ynca-advanced")
+            {
+                var dsp = await _receiver.Sound.GetMainYncaDspStatusAsync();
+                var sb = new StringBuilder("YNCA MAIN DSP values (native, read-only):" + Environment.NewLine);
+                foreach (var field in dsp.Values)
+                    sb.AppendLine("  " + field.Key + " = " + field.Value);
+                foreach (var field in dsp.Unavailable)
+                    sb.AppendLine("  " + field.Key + " = " + field.Value);
+                sb.AppendLine("SOUNDPRG is stored DSP; Straight can change effective playback.");
+                AppendResult(sb.ToString());
+                return;
+            }
+            if (command.Key == "sound-signal-info")
+            {
+                AppendHttp("GET /YamahaExtendedControl/v1/" + zone + "/getSignalInfo");
+                var signal = await _receiver.Sound.GetSignalInfoAsync(zone);
+                var sb = new StringBuilder("Zone " + zone + " audio signal (read-only):" + Environment.NewLine);
+                sb.AppendLine("  Format: " + Show(signal.AudioFormat));
+                sb.AppendLine("  Sample rate: " + Show(signal.SampleRate));
+                sb.AppendLine("  Audio error: " + Show(signal.AudioErrorCode));
+                foreach (var field in signal.AudioFields)
+                    sb.AppendLine("  audio." + field.Key + " = " + field.Value);
+                foreach (var field in signal.OtherFields)
+                    sb.AppendLine("  " + field.Key + " = " + field.Value);
+                sb.AppendLine("Missing/--- does not imply no decoder or no current input support.");
+                AppendResult(sb.ToString());
+                return;
+            }
+            if (command.Key == "sound-decoders")
+            {
+                AppendResult("Advertised surround decoder IDs for " + zone + ": " +
+                    string.Join(", ", _receiver.Sound.GetAdvertisedSurroundDecoderTypes(zone)));
+                return;
+            }
             if (command.Key == "sound-status")
             {
                 AppendHttp("GET /YamahaExtendedControl/v1/" + zone + "/getStatus");
@@ -495,6 +533,10 @@ namespace YamahaAvrNet.TesterGui
                 (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out scene) || scene < 1))
                 throw new ArgumentException("Enter a positive scene number.");
             // Validate the selected ID / scene count before asking for confirmation.
+            if (command.Key == "sound-set-decoder" &&
+                !_receiver.Sound.GetAdvertisedSurroundDecoderTypes(zone).Any(x =>
+                    string.Equals(x, value, StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException("Select a receiver-advertised native decoder ID.");
             if (command.Key == "sound-set-program" &&
                 !_receiver.Sound.GetAdvertisedSoundPrograms(zone).Any(x =>
                     string.Equals(x, value, StringComparison.OrdinalIgnoreCase)))
@@ -516,6 +558,12 @@ namespace YamahaAvrNet.TesterGui
             }
             switch (command.Key)
             {
+                case "sound-set-decoder":
+                    AppendHttp("GET /YamahaExtendedControl/v1/" + zone +
+                        "/setSurroundDecoderType (validated ID; GET readback)");
+                    await _receiver.Sound.SetSurroundDecoderTypeAsync(zone, value);
+                    AppendResult("Surround decoder readback confirmed: " + value);
+                    break;
                 case "sound-set-program":
                     AppendHttp("GET /YamahaExtendedControl/v1/" + zone + "/setSoundProgram (validated ID)");
                     await _receiver.Sound.SetSoundProgramAsync(zone, value);
@@ -549,6 +597,7 @@ namespace YamahaAvrNet.TesterGui
                 " | enhancer=" + ShowBool(state.EnhancerEnabled) +
                 " | direct=" + ShowBool(state.DirectEnabled) +
                 " | surround decoder=" + Show(state.SurroundDecoderNativeId) +
+                " | surround 3D=" + ShowBool(state.Surround3dEnabled) +
                 " | observed UTC=" + state.ObservedUtc.ToString("u", CultureInfo.InvariantCulture);
         }
 

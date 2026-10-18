@@ -74,6 +74,24 @@ namespace YamahaAvrNet.Protocols.ExtendedControl
             return YamahaExtendedResponseParser.ParseZoneSoundStatus(json, zone);
         }
 
+        internal async Task<YamahaAudioSignalInfo> GetZoneSignalInfoAsync(string zone,
+            CancellationToken cancellationToken)
+        {
+            string json = await GetJsonAsync(zone + "/getSignalInfo", cancellationToken)
+                .ConfigureAwait(false);
+            return YamahaExtendedResponseParser.ParseZoneSignalInfo(json, zone);
+        }
+
+        internal async Task SetSurroundDecoderTypeAsync(string zone, string nativeType,
+            CancellationToken cancellationToken)
+        {
+            // Yamaha's 2018 document has a copy/paste typo in the URI table.
+            // Its example and other implementations use setSurroundDecoderType.
+            string operation = zone + "/setSurroundDecoderType?type=" + Uri.EscapeDataString(nativeType);
+            string json = await GetJsonAsync(operation, cancellationToken).ConfigureAwait(false);
+            YamahaExtendedResponseParser.ValidateCommandResponse(json, "setSurroundDecoderType");
+        }
+
         internal async Task SetSoundProgramAsync(string zone, string nativeProgram,
             CancellationToken cancellationToken)
         {

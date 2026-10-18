@@ -33,7 +33,7 @@ namespace YamahaAvrNet.Features.Audio
             Action<string, DateTimeOffset> recordVerifiedWrite,
             Action<string, DateTimeOffset> recordAcceptedAction)
         {
-            _http = http ?? throw new ArgumentNullException(nameof(http));
+            _http = http; // Optional: YNCA-only receivers still expose native DSP reads.
             _ynca = ynca;
             _getFeatures = getFeatures ?? throw new ArgumentNullException(nameof(getFeatures));
             _isDisposed = isDisposed ?? throw new ArgumentNullException(nameof(isDisposed));
@@ -67,6 +67,66 @@ namespace YamahaAvrNet.Features.Audio
                 _recordVerifiedRead(prefix + "enhancer", sound.ObservedUtc);
             if (sound.SurroundDecoderNativeId != null)
                 _recordVerifiedRead(prefix + "surr_decoder_type", sound.ObservedUtc);
+            if (sound.Surround3dEnabled.HasValue)
+                _recordVerifiedRead(prefix + "surround_3d", sound.ObservedUtc);
+        }
+
+        public async Task<YamahaAudioSignalInfo> GetSignalInfoAsync(string zoneNativeId,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            var zone = RequireZone(zoneNativeId);
+            if (!zone.Functions.Any(x => string.Equals(x, "signal_info", StringComparison.OrdinalIgnoreCase)))
+                throw new YamahaFeatureNotSupportedException(
+                    "signal_info is not advertised for this zone. No request was sent.");
+            var info = await _http.GetZoneSignalInfoAsync(zone.NativeId, cancellationToken)
+                .ConfigureAwait(false);
+            // This verifies only the endpoint response, not ongoing playback.
+            _recordVerifiedRead("ExtendedControl:zone." + zone.NativeId + ".signal_info",
+                info.ObservedUtc);
+            return info;
+        }
+
+        public IReadOnlyList<string> GetAdvertisedSurroundDecoderTypes(string zoneNativeId)
+        {
+            var zone = RequireZone(zoneNativeId);
+            IReadOnlyList<string> types;
+            return zone.OptionLists.TryGetValue("surr_decoder_type_list", out types)
+                ? types : Array.AsReadOnly(new string[0]);
+        }
+
+        public async Task<YamahaYncaDspStatus> GetMainYncaDspStatusAsync(
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (_isDisposed()) throw new ObjectDisposedException(nameof(YamahaSoundController));
+            if (_ynca == null)
+                throw new YamahaFeatureNotSupportedException("YNCA is disabled for this receiver.");
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var unavailable = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            // Native YNCA names are not converted to Extended Control sound program IDs.
+            foreach (string function in new[]
+            {
+                "SOUNDPRG", "STRAIGHT", "PUREDIRMODE", "ENHANCER", "3DCINEMA", "ADAPTIVEDSP"
+            })
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    var response = await _ynca.GetAsync("MAIN", function, cancellationToken)
+                        .ConfigureAwait(false);
+                    if (response.Kind == YamahaYncaMessageKind.Value)
+                        values[function] = response.Value;
+                    else unavailable[function] = response.Kind.ToString();
+                }
+                catch (YamahaFeatureNotSupportedException)
+                {
+                    unavailable[function] = "UNDEFINED";
+                }
+                catch (YamahaFeatureTemporarilyUnavailableException)
+                {
+                    unavailable[function] = "RESTRICTED";
+                }
+            }
+            return new YamahaYncaDspStatus(values, unavailable, DateTimeOffset.UtcNow);
         }
 
         public IReadOnlyList<string> GetAdvertisedSoundPrograms(string zoneNativeId)
@@ -101,6 +161,31 @@ namespace YamahaAvrNet.Features.Audio
             RecordSoundRead(actual);
             _recordVerifiedWrite("ExtendedControl:zone." + zone.NativeId + ".sound_program",
                 DateTimeOffset.UtcNow);
+        }
+
+        public async Task SetSurroundDecoderTypeAsync(string zoneNativeId, string decoderNativeId,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
+            RequireWrites();
+            var zone = RequireZone(zoneNativeId);
+            if (!zone.Functions.Any(x => string.Equals(x, "surr_decoder_type", StringComparison.OrdinalIgnoreCase)))
+                throw new YamahaFeatureNotSupportedException("This zone did not advertise decoder selection.");
+            if (string.IsNullOrWhiteSpace(decoderNativeId))
+                throw new YamahaValidationException("A native surround decoder ID is required.");
+            string selected = GetAdvertisedSurroundDecoderTypes(zone.NativeId).FirstOrDefault(x =>
+                string.Equals(x, decoderNativeId.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (selected == null)
+                throw new YamahaValidationException("Decoder type is not advertised for this zone.");
+            await _http.SetSurroundDecoderTypeAsync(zone.NativeId, selected, cancellationToken)
+                .ConfigureAwait(false);
+            var actual = await _http.GetZoneSoundStatusAsync(zone.NativeId, cancellationToken)
+                .ConfigureAwait(false);
+            RecordSoundRead(actual);
+            if (!string.Equals(actual.SurroundDecoderNativeId, selected, StringComparison.OrdinalIgnoreCase))
+                throw new YamahaStateVerificationException(
+                    "Surround decoder readback differs from the requested ID; do not retry blindly.");
+            _recordVerifiedWrite("ExtendedControl:zone." + zone.NativeId + ".surr_decoder_type",
+                actual.ObservedUtc);
         }
 
         public Task SetPureDirectAsync(bool enabled,
@@ -161,6 +246,9 @@ namespace YamahaAvrNet.Features.Audio
         private YamahaExtendedZoneFeatures RequireZone(string nativeZoneId)
         {
             if (_isDisposed()) throw new ObjectDisposedException(nameof(YamahaSoundController));
+            if (_http == null)
+                throw new YamahaFeatureNotSupportedException(
+                    "Extended Control is disabled; this operation requires Extended Control.");
             if (string.IsNullOrWhiteSpace(nativeZoneId))
                 throw new YamahaValidationException("Zone ID is required.");
             // Do not allow arbitrary paths to reach the HTTP transport.

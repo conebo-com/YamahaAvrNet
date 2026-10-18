@@ -138,6 +138,48 @@ namespace YamahaAvrNet.Sample
                 }
                 else Console.WriteLine("Extended Control feature lists unavailable; other protocols remain usable.");
 
+                if (receiver.Sound != null && features != null &&
+                    Confirm("Read audio signal info (no playback required)? [y/N]: "))
+                {
+                    foreach (var zone in features.Zones.Where(z => z.Functions.Any(f =>
+                        string.Equals(f, "signal_info", StringComparison.OrdinalIgnoreCase))))
+                    {
+                        try
+                        {
+                            var signal = await receiver.Sound.GetSignalInfoAsync(zone.NativeId);
+                            Console.WriteLine("Zone " + zone.NativeId + " signal: format=" +
+                                Show(signal.AudioFormat) + ", Fs=" + Show(signal.SampleRate) +
+                                ", error=" + Show(signal.AudioErrorCode));
+                            foreach (var field in signal.AudioFields)
+                                Console.WriteLine("  audio." + field.Key + "=" + field.Value);
+                            foreach (var field in signal.OtherFields)
+                                Console.WriteLine("  " + field.Key + "=" + field.Value);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("Zone " + zone.NativeId + " signal read unavailable: " + ex.Message);
+                        }
+                    }
+                    Console.WriteLine("Unknown signal fields do not prove absence of an audio feature.");
+                }
+                if (receiver.Sound != null && receiver.Ynca != null &&
+                    Confirm("Read YNCA MAIN advanced DSP settings? [y/N]: "))
+                {
+                    try
+                    {
+                        var dsp = await receiver.Sound.GetMainYncaDspStatusAsync();
+                        foreach (var value in dsp.Values)
+                            Console.WriteLine("  MAIN:" + value.Key + "=" + value.Value);
+                        foreach (var missing in dsp.Unavailable)
+                            Console.WriteLine("  MAIN:" + missing.Key + "=" + missing.Value);
+                        Console.WriteLine("YNCA SOUNDPRG is stored DSP; Straight may override playback.");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("YNCA DSP read failed: " + ex.Message);
+                    }
+                }
+
                 if (!Confirm("Read legacy XML speaker settings? [y/N]: "))
                 {
                     await ReadYncaAsync(receiver);

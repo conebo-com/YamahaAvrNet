@@ -343,3 +343,35 @@ Only the command mappings already implemented by the library are cataloged;
 Phase 5.4 is **not** a universal Yamaha command database, automatic write
 permission system, or multi-model verification. A receiver-specific hardware
 check and a Windows `net48` build are still required for this revision.
+
+## Phase 5.5: Audio signal and advanced DSP inspection
+
+`receiver.Sound.GetSignalInfoAsync("main")` reads the receiver-advertised
+`/YamahaExtendedControl/v1/main/getSignalInfo` endpoint. The returned
+`YamahaAudioSignalInfo` preserves Yamaha-native `audio.format`, `audio.fs`,
+`audio.error`, and any additional scalar or object fields for diagnostics.
+Missing, empty, and `---` fields mean **unknown**, especially in standby or
+with no active signal. An HTTP/Yamaha response_code success is evidence of
+endpoint availability, **not** evidence of current playback or Dolby/DTS decoding.
+
+`receiver.Sound.GetAdvertisedSurroundDecoderTypes("main")` exposes the native
+`getFeatures` decoder list. `SetSurroundDecoderTypeAsync` is available only with
+`EnableSoundSceneWrites=true`, validates the advertised zone, function and ID,
+and requires a matching `getStatus` readback. It is **not yet hardware-verified**.
+The method uses the documented *example* endpoint `setSurroundDecoderType`:
+Yamaha's 2018 API specification contains an inconsistent URL table for this
+method. Other Sound/Scene write safeguards remain unchanged.
+
+`receiver.Sound.GetMainYncaDspStatusAsync()` also works when Extended Control
+is disabled (with YNCA enabled). It performs read-only queries for
+`MAIN:SOUNDPRG`, `STRAIGHT`, `PUREDIRMODE`, `ENHANCER`, `3DCINEMA` and
+`ADAPTIVEDSP`, reporting UNDEFINED/RESTRICTED individually. Native YNCA
+`SOUNDPRG` is **stored DSP**, while Extended Control `sound_program` can
+represent the effective mode (e.g. `straight`). `surround_3d` from Extended
+Control is kept distinct from the native YNCA `3DCINEMA` field. No YNCA
+advanced DSP writes or guessed Dolby Atmos/DTS:X decoding interpretations are
+introduced in this phase.
+
+The console sample and tester GUI include manual audio-signal, decoder-list
+and native DSP inspection. No audio playback is necessary for connectivity
+testing. No new model profile or dependency on AvrDispatcher is introduced.

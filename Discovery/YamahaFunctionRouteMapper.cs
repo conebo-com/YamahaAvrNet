@@ -58,12 +58,35 @@ namespace YamahaAvrNet.Discovery
                     // Only the implemented Extended Control controllers are marked implemented.
                     bool controllerMapped = IsMappedSoundZone(zone.NativeId);
                     if (controllerMapped)
-                        foreach (string field in new[] { "pure_direct", "enhancer", "surr_decoder_type" })
+                        foreach (string field in new[] { "pure_direct", "enhancer", "surr_decoder_type", "surround_3d" })
                         {
                             RouteBuilder soundField;
                             if (routes.TryGetValue("ExtendedControl:" + prefix + field, out soundField))
                                 soundField.ImplementedRead = true;
                         }
+                    if (controllerMapped)
+                    {
+                        // getStatus may return this field even when it is absent
+                        // from zone.func_list. Do not mark it supported until observed.
+                        var s3d = Add(routes, prefix + "surround_3d", "ExtendedControl",
+                            "getStatus.surround_3d", "optional getStatus field",
+                            YamahaCapabilityStatus.Unknown);
+                        s3d.ImplementedRead = true;
+                    }
+                    if (controllerMapped && Contains(zone.Functions, "signal_info"))
+                    {
+                        var signal = Add(routes, prefix + "signal_info", "ExtendedControl",
+                            "getSignalInfo", "implemented read-only endpoint", YamahaCapabilityStatus.Advertised);
+                        signal.ImplementedRead = true;
+                    }
+                    if (controllerMapped && Contains(zone.Functions, "surr_decoder_type") &&
+                        zone.OptionLists.ContainsKey("surr_decoder_type_list"))
+                    {
+                        var decoder = Add(routes, prefix + "surr_decoder_type", "ExtendedControl",
+                            "setSurroundDecoderType", "validated native decoder controller", YamahaCapabilityStatus.Advertised);
+                        decoder.ImplementedRead = true;
+                        decoder.ImplementedWrite = true;
+                    }
                     if (controllerMapped && zone.SoundPrograms.Count > 0)
                     {
                         var sound = Add(routes, prefix + "sound_program", "ExtendedControl",
@@ -161,6 +184,8 @@ namespace YamahaAvrNet.Discovery
                         AddKnownYnca(routes, native, "STRAIGHT", true, true);
                         AddKnownYnca(routes, native, "PUREDIRMODE", true, true);
                         AddKnownYnca(routes, native, "ENHANCER", true, true);
+                        AddKnownYnca(routes, native, "3DCINEMA", true, false);
+                        AddKnownYnca(routes, native, "ADAPTIVEDSP", true, false);
                     }
                 }
             }
@@ -237,6 +262,8 @@ namespace YamahaAvrNet.Discovery
                 case "STRAIGHT": suffix = zone == "main" ? "straight" : null; break;
                 case "PUREDIRMODE": suffix = zone == "main" ? "pure_direct" : null; break;
                 case "ENHANCER": suffix = zone == "main" ? "enhancer" : null; break;
+                case "3DCINEMA": suffix = zone == "main" ? "cinema_3d_native" : null; break;
+                case "ADAPTIVEDSP": suffix = zone == "main" ? "adaptive_dsp_native" : null; break;
                 default: suffix = null; break;
             }
             return suffix == null ? null : "zone." + zone + "." + suffix;

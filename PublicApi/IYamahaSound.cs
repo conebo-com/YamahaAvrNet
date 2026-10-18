@@ -13,9 +13,19 @@ namespace YamahaAvrNet.PublicApi
     {
         Task<YamahaSoundStatus> GetStatusAsync(string zoneNativeId,
             CancellationToken cancellationToken = default(CancellationToken));
+        /// <summary>Read getSignalInfo where the receiver advertises signal_info.</summary>
+        Task<YamahaAudioSignalInfo> GetSignalInfoAsync(string zoneNativeId,
+            CancellationToken cancellationToken = default(CancellationToken));
+        /// <summary>Read native YNCA MAIN DSP fields; unsupported optional keys remain unknown.</summary>
+        Task<YamahaYncaDspStatus> GetMainYncaDspStatusAsync(
+            CancellationToken cancellationToken = default(CancellationToken));
+        IReadOnlyList<string> GetAdvertisedSurroundDecoderTypes(string zoneNativeId);
         IReadOnlyList<string> GetAdvertisedSoundPrograms(string zoneNativeId);
         int? GetAdvertisedSceneCount(string zoneNativeId);
         Task SetSoundProgramAsync(string zoneNativeId, string programNativeId,
+            CancellationToken cancellationToken = default(CancellationToken));
+        /// <summary>Set a receiver-advertised decoder type with explicit opt-in and readback.</summary>
+        Task SetSurroundDecoderTypeAsync(string zoneNativeId, string decoderNativeId,
             CancellationToken cancellationToken = default(CancellationToken));
         Task SetPureDirectAsync(bool enabled,
             CancellationToken cancellationToken = default(CancellationToken));
