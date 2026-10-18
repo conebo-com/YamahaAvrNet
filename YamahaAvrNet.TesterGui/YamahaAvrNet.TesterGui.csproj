@@ -48,12 +48,20 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </Page>
+    <Page Include="CompatibilityReportWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Compile Include="App.xaml.cs">
       <DependentUpon>App.xaml</DependentUpon>
     </Compile>
     <Compile Include="MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
     </Compile>
+    <Compile Include="CompatibilityReportWindow.xaml.cs">
+      <DependentUpon>CompatibilityReportWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Include="GuiText.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <None Include="App.config" />
   </ItemGroup>
@@ -61,10 +69,6 @@
     <ProjectReference Include="..\YamahaAvrNet.csproj">
       <Project>{3B45FD17-33D4-44CB-9DA2-8953D4BA4B1D}</Project>
       <Name>YamahaAvrNet</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\AvrNet.Abstractions\AvrNet.Abstractions.csproj">
-      <Project>{85E0BAA1-2877-4812-8C25-1CD8D113E372}</Project>
-      <Name>AvrNet.Abstractions</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
