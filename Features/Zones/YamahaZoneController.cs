@@ -24,6 +24,7 @@ namespace YamahaAvrNet.Features.Zones
         private readonly Func<IReadOnlyList<YamahaZoneInfo>> _discoveredZones;
         private readonly Func<bool> _isDisposed;
         private readonly bool _allowWrites;
+        private readonly Action<string, DateTimeOffset> _recordVerifiedWrite;
         private readonly object _sync = new object();
         private readonly Dictionary<string, YamahaZoneState> _states =
             new Dictionary<string, YamahaZoneState>(StringComparer.OrdinalIgnoreCase);
@@ -32,13 +33,16 @@ namespace YamahaAvrNet.Features.Zones
         internal YamahaZoneController(YamahaYncaTcpSession session,
             Func<YamahaExtendedFeatures> features,
             Func<IReadOnlyList<YamahaZoneInfo>> discoveredZones,
-            Func<bool> isDisposed, bool allowWrites)
+            Func<bool> isDisposed, bool allowWrites,
+            Action<string, DateTimeOffset> recordVerifiedWrite)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _features = features ?? throw new ArgumentNullException(nameof(features));
             _discoveredZones = discoveredZones ?? throw new ArgumentNullException(nameof(discoveredZones));
             _isDisposed = isDisposed ?? throw new ArgumentNullException(nameof(isDisposed));
             _allowWrites = allowWrites;
+            _recordVerifiedWrite = recordVerifiedWrite ??
+                throw new ArgumentNullException(nameof(recordVerifiedWrite));
             _session.MessageReceived += SessionOnMessageReceived;
             _session.ConnectionChanged += SessionOnConnectionChanged;
         }
@@ -146,6 +150,9 @@ namespace YamahaAvrNet.Features.Zones
                     field + " value. Requested: " + requested + ", observed: " + observed.Value +
                     ". Do not retry blindly.");
             // A matching GET observation cannot exclude an identical unsolicited update.
+            // Evidence applies only to this receiver instance, never to every Yamaha.
+            string id = YamahaAvrNet.Discovery.YamahaFunctionRouteMapper.YncaFunctionId(subunit, field);
+            if (id != null) _recordVerifiedWrite("YNCA:" + id, observed.ReceivedUtc);
         }
 
         private string RequireZone(string id)

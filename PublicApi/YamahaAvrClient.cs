@@ -38,6 +38,13 @@ namespace YamahaAvrNet.PublicApi
         private string _yncaModel;
         private int? _legacyActivePattern;
         private YamahaLegacyDescriptor _legacyDescriptor;
+        private YamahaLegacyDescriptorDiagnostic _legacyDescriptorDiagnostic;
+        private readonly Dictionary<string, DateTimeOffset> _extendedVerifiedReads =
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTimeOffset> _verifiedWrites =
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTimeOffset> _acceptedActions =
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         private IReadOnlyList<YamahaFunctionRoute> _functionRoutes =
             Array.AsReadOnly(new YamahaFunctionRoute[0]);
         private readonly Dictionary<string, YamahaProtocolProbe> _protocols =
@@ -66,19 +73,22 @@ namespace YamahaAvrNet.PublicApi
                 ? new YamahaLegacyDescriptorProbe(_options) : null;
             _yncaSession = _options.EnableYnca
                 ? new YamahaYncaTcpSession(_options.Host, _options.YncaPort, _options.RequestTimeout) : null;
+            if (_yncaSession != null)
+                _yncaSession.ReadSucceeded += RecordYncaRead;
             Ynca = _yncaSession == null ? null : new YamahaYncaController(_yncaSession);
             _zoneController = _yncaSession == null ? null : new YamahaZoneController(
                 _yncaSession, () => DeviceFeatures, () => Zones,
-                () => _disposed, _options.EnableYncaZoneWrites);
+                () => _disposed, _options.EnableYncaZoneWrites, RecordVerifiedWrite);
             ZoneControl = _zoneController;
             Sound = _extendedHttp == null ? null : new YamahaSoundController(
                 _extendedHttp, _yncaSession, () => DeviceFeatures,
-                () => _disposed, _options.EnableSoundSceneWrites);
+                () => _disposed, _options.EnableSoundSceneWrites,
+                RecordExtendedRead, RecordVerifiedWrite, RecordAcceptedAction);
             SetInitialProtocolStates();
             Speakers = new YamahaSpeakerSetupController(EnsureNotDisposed, _legacyXml,
                 GetReportedSpeakerPatternCount,
                 _extendedHttp == null ? null : (Func<CancellationToken, Task<int?>>)GetExtendedActivePatternAsync,
-                RecordSpeakerRead, () => Model,
+                RecordSpeakerRead, RecordVerifiedWrite, () => Model,
                 () => DeviceInfo == null ? null : DeviceInfo.SystemVersion,
                 _options.EnableVerifiedSpeakerWrites);
         }
@@ -139,9 +149,49 @@ namespace YamahaAvrNet.PublicApi
         /// Receiver-advertised native function identifiers and YNCA read observations,
         /// grouped by protocol. Routes are descriptive, not executable commands.
         /// </summary>
+        public YamahaLegacyDescriptorDiagnostic LegacyDescriptorDiagnostic
+        {
+            get { EnsureNotDisposed(); lock (_stateSync) return _legacyDescriptorDiagnostic; }
+        }
+
         public IReadOnlyList<YamahaFunctionRoute> FunctionRoutes
         {
             get { EnsureNotDisposed(); lock (_stateSync) return _functionRoutes; }
+        }
+
+        /// <summary>
+        /// Chooses a deterministic already-verified route for informational routing.
+        /// It NEVER sends a command or grants permission to bypass a controller's
+        /// device-specific checks or explicit write opt-in.
+        /// </summary>
+        public YamahaFunctionRoute GetPreferredVerifiedRoute(string functionId,
+            YamahaFunctionOperation operation)
+        {
+            if (string.IsNullOrWhiteSpace(functionId))
+                throw new ArgumentException("A function ID is required.", nameof(functionId));
+            EnsureNotDisposed();
+            lock (_stateSync)
+            {
+                YamahaFunctionRoute best = null;
+                foreach (var candidate in _functionRoutes)
+                {
+                    if (!string.Equals(candidate.FunctionId, functionId,
+                        StringComparison.OrdinalIgnoreCase) || !candidate.IsVerifiedFor(operation))
+                        continue;
+                    if (best == null || RoutePriority(candidate, operation) < RoutePriority(best, operation))
+                        best = candidate;
+                }
+                return best;
+            }
+        }
+
+        private static int RoutePriority(YamahaFunctionRoute route, YamahaFunctionOperation operation)
+        {
+            // For reads, stateless HTTP is preferred when equally verified. For
+            // writes/execute, availability of verified evidence is the only filter.
+            if (string.Equals(route.Protocol, "ExtendedControl", StringComparison.OrdinalIgnoreCase)) return 0;
+            if (string.Equals(route.Protocol, "LegacyXml", StringComparison.OrdinalIgnoreCase)) return 1;
+            return 2;
         }
 
         public IReadOnlyList<YamahaCapability> Capabilities
@@ -298,6 +348,10 @@ namespace YamahaAvrNet.PublicApi
                 _yncaModel = null;
                 _legacyActivePattern = null;
                 _legacyDescriptor = null;
+                _legacyDescriptorDiagnostic = null;
+                _extendedVerifiedReads.Clear();
+                _verifiedWrites.Clear();
+                _acceptedActions.Clear();
                 _functionRoutes = Array.AsReadOnly(new YamahaFunctionRoute[0]);
                 _lastUpdatedUtc = null;
                 _zones = EmptyZones;
@@ -390,8 +444,12 @@ namespace YamahaAvrNet.PublicApi
             {
                 try
                 {
-                    var descriptor = await _descriptorProbe.ReadAsync(ct).ConfigureAwait(false);
-                    lock (_stateSync) _legacyDescriptor = descriptor;
+                    var result = await _descriptorProbe.ProbeAsync(ct).ConfigureAwait(false);
+                    lock (_stateSync)
+                    {
+                        _legacyDescriptor = result.Descriptor;
+                        _legacyDescriptorDiagnostic = result.Diagnostic;
+                    }
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                 catch (Exception)
@@ -542,6 +600,9 @@ namespace YamahaAvrNet.PublicApi
             {
                 _features = null;
                 _speakerVerifiedReads.Clear();
+                _extendedVerifiedReads.Clear();
+                _verifiedWrites.Clear();
+                _acceptedActions.Clear();
                 _functionStatus = null;
                 _zones = EmptyZones;
                 _capabilities = new YamahaDeviceCapabilities(new YamahaCapability[0]);
@@ -609,8 +670,82 @@ namespace YamahaAvrNet.PublicApi
                     model: device == null ? _yncaModel : device.ModelName,
                     firmware: device == null ? null : device.SystemVersion,
                     lastVerifiedUtc: _legacyDescriptor.ObservedUtc));
-            _functionRoutes = YamahaFunctionRouteMapper.Build(features, _yncaVerifiedReads);
-            return new YamahaDeviceCapabilities(known);
+            _functionRoutes = YamahaFunctionRouteMapper.Build(device, features, status,
+                _zones, _protocols["YNCA"].Availability == YamahaProtocolAvailability.Available,
+                _protocols["LegacyXml"].Availability == YamahaProtocolAvailability.Available,
+                _legacyActivePattern, _yncaVerifiedReads, _speakerVerifiedReads,
+                _extendedVerifiedReads, _verifiedWrites, _acceptedActions);
+
+            // Present a coherent logical capability as well as the per-protocol
+            // FunctionRoutes. A write result cannot be generalized to other models.
+            var merged = new Dictionary<string, YamahaCapability>(StringComparer.OrdinalIgnoreCase);
+            foreach (var capability in known)
+                merged[capability.FeatureId] = capability;
+            foreach (var route in _functionRoutes)
+            {
+                if (route.CanRead != true && route.CanWrite != true && route.CanExecute != true)
+                    continue;
+                YamahaCapability prior;
+                merged.TryGetValue(route.FunctionId, out prior);
+                bool canRead = route.CanRead == true || (prior != null && prior.CanRead == true);
+                bool canWrite = route.CanWrite == true || (prior != null && prior.CanWrite == true);
+                bool canExecute = route.CanExecute == true || (prior != null && prior.CanExecute == true);
+                var verification = canWrite ? YamahaCapabilityStatus.WriteVerified :
+                    canRead ? YamahaCapabilityStatus.ReadVerified : YamahaCapabilityStatus.ActionAccepted;
+                merged[route.FunctionId] = new YamahaCapability(route.FunctionId, verification,
+                    canWrite ? YamahaEvidenceSource.VerifiedHardwareWrite : YamahaEvidenceSource.ReadProbe,
+                    canRead: canRead ? (bool?)true : null,
+                    canWrite: canWrite ? (bool?)true : null,
+                    canExecute: canExecute ? (bool?)true : null,
+                    protocol: route.Protocol,
+                    model: device == null ? _yncaModel : device.ModelName,
+                    firmware: device == null ? null : device.SystemVersion,
+                    lastVerifiedUtc: route.LastObservedUtc ?? (prior == null ? null : prior.LastVerifiedUtc));
+            }
+            return new YamahaDeviceCapabilities(merged.Values);
+        }
+
+        private void RecordYncaRead(YamahaYncaMessage message)
+        {
+            if (_disposed || message == null || message.Kind != YamahaYncaMessageKind.Value)
+                return;
+            string key = "ynca." + message.Subunit.ToLowerInvariant() + "." +
+                message.Function.ToLowerInvariant();
+            lock (_stateSync)
+            {
+                _yncaVerifiedReads[key] = message.ReceivedUtc;
+                _capabilities = BuildCapabilities(_deviceInfo, _features, _functionStatus);
+            }
+        }
+
+        private void RecordExtendedRead(string protocolRouteKey, DateTimeOffset observedUtc)
+        {
+            lock (_stateSync)
+            {
+                if (_disposed) return;
+                _extendedVerifiedReads[protocolRouteKey] = observedUtc;
+                _capabilities = BuildCapabilities(_deviceInfo, _features, _functionStatus);
+            }
+        }
+
+        private void RecordVerifiedWrite(string protocolRouteKey, DateTimeOffset observedUtc)
+        {
+            lock (_stateSync)
+            {
+                if (_disposed) return;
+                _verifiedWrites[protocolRouteKey] = observedUtc;
+                _capabilities = BuildCapabilities(_deviceInfo, _features, _functionStatus);
+            }
+        }
+
+        private void RecordAcceptedAction(string protocolRouteKey, DateTimeOffset observedUtc)
+        {
+            lock (_stateSync)
+            {
+                if (_disposed) return;
+                _acceptedActions[protocolRouteKey] = observedUtc;
+                _capabilities = BuildCapabilities(_deviceInfo, _features, _functionStatus);
+            }
         }
 
         private void RecordSpeakerRead(string featureId, DateTimeOffset observedUtc)

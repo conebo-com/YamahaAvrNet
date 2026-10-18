@@ -21,6 +21,7 @@ namespace YamahaAvrNet.Features.SpeakerSetup
         private readonly Func<int?> _getReportedPatternCount;
         private readonly Func<CancellationToken, Task<int?>> _getExtendedActivePattern;
         private readonly Action<string, DateTimeOffset> _recordVerifiedRead;
+        private readonly Action<string, DateTimeOffset> _recordVerifiedWrite;
         private readonly Func<string> _getModel;
         private readonly Func<string> _getFirmware;
         private readonly bool _enableVerifiedSpeakerWrites;
@@ -31,6 +32,7 @@ namespace YamahaAvrNet.Features.SpeakerSetup
             Func<int?> getReportedPatternCount,
             Func<CancellationToken, Task<int?>> getExtendedActivePattern,
             Action<string, DateTimeOffset> recordVerifiedRead,
+            Action<string, DateTimeOffset> recordVerifiedWrite,
             Func<string> getModel,
             Func<string> getFirmware,
             bool enableVerifiedSpeakerWrites)
@@ -43,6 +45,8 @@ namespace YamahaAvrNet.Features.SpeakerSetup
             _getExtendedActivePattern = getExtendedActivePattern;
             _recordVerifiedRead = recordVerifiedRead ??
                 throw new ArgumentNullException(nameof(recordVerifiedRead));
+            _recordVerifiedWrite = recordVerifiedWrite ??
+                throw new ArgumentNullException(nameof(recordVerifiedWrite));
             _getModel = getModel ?? throw new ArgumentNullException(nameof(getModel));
             _getFirmware = getFirmware ?? throw new ArgumentNullException(nameof(getFirmware));
             _enableVerifiedSpeakerWrites = enableVerifiedSpeakerWrites;
@@ -61,6 +65,8 @@ namespace YamahaAvrNet.Features.SpeakerSetup
                         YamahaLegacyXmlCommandBuilder.ActivePattern(), cancellationToken)
                         .ConfigureAwait(false);
                     int? active = YamahaLegacyXmlResponseParser.ParseActivePattern(xml);
+                    if (active.HasValue)
+                        _recordVerifiedRead("speaker.pattern", DateTimeOffset.UtcNow);
                     if (active.HasValue || _getExtendedActivePattern == null)
                         return active;
                 }
@@ -201,6 +207,8 @@ namespace YamahaAvrNet.Features.SpeakerSetup
                 if (activeAfter != 1)
                     throw new YamahaStateVerificationException(
                         "Speaker pattern changed during write verification. Check the receiver manually.");
+                _recordVerifiedWrite("LegacyXml:speaker.pattern.1.channel.front_l." +
+                    (isDistance ? "distance" : "level"), DateTimeOffset.UtcNow);
             }
             finally { _writeGate.Release(); }
         }

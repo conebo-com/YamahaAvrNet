@@ -297,3 +297,49 @@ All Phase 5.1 writes require `EnableSoundSceneWrites = true`; the option is fals
 for each sound/scene change. The interactive console sample remains read-only and
 can display the sound status, available sound IDs and scene count. The new Phase 5.1
 C# write methods have **not** yet been live-validated on the receiver.
+
+## Phase 5.4: Per-protocol routes and evidence-aware resolution
+
+Phase 5.4 adds a command implementation catalog alongside receiver-advertised
+metadata. `FunctionRoutes` now includes implemented YNCA zone commands and Main
+DSP switches, observed YNCA GETs, Extended Control sound/scene operations,
+and Legacy XML aggregate speaker GETs. An **implemented** command is not proof
+that a particular receiver supports it. `ImplementedRead`, `ImplementedWrite`
+and `ImplementedExecute` describe library code; `CanRead`, `CanWrite`, and
+`CanExecute` are nullable, receiver-instance-specific observations. Unprobed
+capabilities stay `null`, not `false`.
+
+The existing controllers publish successful GET/readback evidence. A successfully
+verified zone/sound/speaker write is recorded only after its existing guardrails
+and readback have passed. A successful `recallScene` response is marked
+`ActionAccepted` and `CanExecute=true`: this means the action was **accepted**,
+not that all resulting settings were independently verified. Historical write
+tests are not silently promoted to live evidence for a newly discovered device.
+All write opt-in settings and model-specific speaker restrictions remain in
+force, and discovery itself sends no writes.
+
+`GetPreferredVerifiedRoute(featureId, operation)` is a read-only, deterministic
+*diagnostic selector*: it returns a route only when that operation has positive
+evidence and a library implementation. It returns `null` when evidence is
+missing. It does **not** execute or dispatch calls, bypass validation, or
+guarantee subsequent access. Future AvrDispatcher adapters may use this
+metadata, but YamahaAvrNet remains independent of AvrDispatcher.
+
+```csharp
+await receiver.InitializeAsync();
+var route = receiver.GetPreferredVerifiedRoute(
+    "zone.main.power", YamahaFunctionOperation.Read);
+Console.WriteLine(route == null ? "No verified read route yet" :
+    route.Protocol + ":" + route.NativeIdentifier);
+```
+
+The optional legacy descriptor now exposes a diagnostic snapshot even when the
+XML itself is unavailable. `LegacyDescriptorDiagnostic.Attempts` distinguishes
+HTTP 404/410, other HTTP errors, malformed or unrecognized XML, network errors
+and timeouts. This does **not** affect availability of working legacy control
+paths. The sample and WPF tester display the attempt results.
+
+Only the command mappings already implemented by the library are cataloged;
+Phase 5.4 is **not** a universal Yamaha command database, automatic write
+permission system, or multi-model verification. A receiver-specific hardware
+check and a Windows `net48` build are still required for this revision.

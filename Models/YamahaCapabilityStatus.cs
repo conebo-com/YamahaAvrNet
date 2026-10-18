@@ -8,6 +8,7 @@ namespace YamahaAvrNet.Models
         ReadVerified = 2,
         WriteVerified = 3,
         KnownUnsupported = 4,
-        TemporarilyUnavailable = 5
+        TemporarilyUnavailable = 5,
+        ActionAccepted = 6
     }
 }

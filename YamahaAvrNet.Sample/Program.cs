@@ -75,12 +75,26 @@ namespace YamahaAvrNet.Sample
                     (description == null ? "unavailable / unverified" :
                         description.ResourcePath + " (" + description.CommandElementCount +
                         " command elements; incomplete metadata)"));
+                var descriptorDiagnostic = receiver.LegacyDescriptorDiagnostic;
+                if (descriptorDiagnostic != null)
+                    foreach (var attempt in descriptorDiagnostic.Attempts)
+                        Console.WriteLine("  " + attempt.Path + ": " + attempt.Status +
+                            (attempt.HttpStatusCode.HasValue ? " (HTTP " + attempt.HttpStatusCode + ")" : "") +
+                            (string.IsNullOrEmpty(attempt.Detail) ? "" : " - " + attempt.Detail));
                 if (Confirm("Show discovered function routes? [y/N]: "))
                 {
                     foreach (var route in receiver.FunctionRoutes.OrderBy(r => r.FunctionId)
                         .ThenBy(r => r.Protocol))
                         Console.WriteLine("  " + route.FunctionId + " | " + route.Protocol +
-                            " | " + route.NativeIdentifier + " | " + route.Status);
+                            " | " + route.NativeIdentifier + " | " + route.Status +
+                            " | implementation R/W/E=" +
+                            (route.ImplementedRead ? "Y" : "-") + "/" +
+                            (route.ImplementedWrite ? "Y" : "-") + "/" +
+                            (route.ImplementedExecute ? "Y" : "-") +
+                            " | verified R/W/E=" +
+                            (route.CanRead == true ? "Y" : "?") + "/" +
+                            (route.CanWrite == true ? "Y" : "?") + "/" +
+                            (route.CanExecute == true ? "Y" : "?"));
                     Console.WriteLine("Routes are discovery metadata, not executable commands.");
                 }
                 Console.WriteLine("Reported zones: " +

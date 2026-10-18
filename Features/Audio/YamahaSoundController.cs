@@ -22,23 +22,51 @@ namespace YamahaAvrNet.Features.Audio
         private readonly Func<YamahaExtendedFeatures> _getFeatures;
         private readonly Func<bool> _isDisposed;
         private readonly bool _allowWrites;
+        private readonly Action<string, DateTimeOffset> _recordVerifiedRead;
+        private readonly Action<string, DateTimeOffset> _recordVerifiedWrite;
+        private readonly Action<string, DateTimeOffset> _recordAcceptedAction;
 
         internal YamahaSoundController(YamahaExtendedHttpClient http,
             YamahaYncaTcpSession ynca, Func<YamahaExtendedFeatures> getFeatures,
-            Func<bool> isDisposed, bool allowWrites)
+            Func<bool> isDisposed, bool allowWrites,
+            Action<string, DateTimeOffset> recordVerifiedRead,
+            Action<string, DateTimeOffset> recordVerifiedWrite,
+            Action<string, DateTimeOffset> recordAcceptedAction)
         {
             _http = http ?? throw new ArgumentNullException(nameof(http));
             _ynca = ynca;
             _getFeatures = getFeatures ?? throw new ArgumentNullException(nameof(getFeatures));
             _isDisposed = isDisposed ?? throw new ArgumentNullException(nameof(isDisposed));
             _allowWrites = allowWrites;
+            _recordVerifiedRead = recordVerifiedRead ??
+                throw new ArgumentNullException(nameof(recordVerifiedRead));
+            _recordVerifiedWrite = recordVerifiedWrite ??
+                throw new ArgumentNullException(nameof(recordVerifiedWrite));
+            _recordAcceptedAction = recordAcceptedAction ??
+                throw new ArgumentNullException(nameof(recordAcceptedAction));
         }
 
-        public Task<YamahaSoundStatus> GetStatusAsync(string zoneNativeId,
+        public async Task<YamahaSoundStatus> GetStatusAsync(string zoneNativeId,
             CancellationToken cancellationToken = default(CancellationToken))
         {
             var zone = RequireZone(zoneNativeId);
-            return _http.GetZoneSoundStatusAsync(zone.NativeId, cancellationToken);
+            var sound = await _http.GetZoneSoundStatusAsync(zone.NativeId, cancellationToken)
+                .ConfigureAwait(false);
+            RecordSoundRead(sound);
+            return sound;
+        }
+
+        private void RecordSoundRead(YamahaSoundStatus sound)
+        {
+            string prefix = "ExtendedControl:zone." + sound.ZoneNativeId + ".";
+            if (sound.SoundProgramNativeId != null)
+                _recordVerifiedRead(prefix + "sound_program", sound.ObservedUtc);
+            if (sound.PureDirectEnabled.HasValue)
+                _recordVerifiedRead(prefix + "pure_direct", sound.ObservedUtc);
+            if (sound.EnhancerEnabled.HasValue)
+                _recordVerifiedRead(prefix + "enhancer", sound.ObservedUtc);
+            if (sound.SurroundDecoderNativeId != null)
+                _recordVerifiedRead(prefix + "surr_decoder_type", sound.ObservedUtc);
         }
 
         public IReadOnlyList<string> GetAdvertisedSoundPrograms(string zoneNativeId)
@@ -70,6 +98,9 @@ namespace YamahaAvrNet.Features.Audio
             if (!string.Equals(actual.SoundProgramNativeId, selected, StringComparison.OrdinalIgnoreCase))
                 throw new YamahaStateVerificationException("Sound program readback does not match the requested ID. " +
                     "Receiver state may have changed; do not retry blindly.");
+            RecordSoundRead(actual);
+            _recordVerifiedWrite("ExtendedControl:zone." + zone.NativeId + ".sound_program",
+                DateTimeOffset.UtcNow);
         }
 
         public Task SetPureDirectAsync(bool enabled,
@@ -105,6 +136,8 @@ namespace YamahaAvrNet.Features.Audio
             if (!string.Equals(response.Value, target, StringComparison.OrdinalIgnoreCase))
                 throw new YamahaStateVerificationException("YNCA " + function +
                     " readback differs from the requested value; do not retry blindly.");
+            string id = YamahaAvrNet.Discovery.YamahaFunctionRouteMapper.YncaFunctionId("MAIN", function);
+            if (id != null) _recordVerifiedWrite("YNCA:" + id, response.ReceivedUtc);
         }
 
         public async Task RecallSceneAsync(string zoneNativeId, int sceneNumber,
@@ -121,6 +154,8 @@ namespace YamahaAvrNet.Features.Audio
             // scene-dependent input/DSP settings have been proven to take effect.
             await _http.RecallSceneAsync(zone.NativeId, sceneNumber, cancellationToken)
                 .ConfigureAwait(false);
+            _recordAcceptedAction("ExtendedControl:zone." + zone.NativeId + ".scene",
+                DateTimeOffset.UtcNow);
         }
 
         private YamahaExtendedZoneFeatures RequireZone(string nativeZoneId)

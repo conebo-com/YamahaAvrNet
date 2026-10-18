@@ -691,7 +691,7 @@ namespace YamahaAvrNet.TesterGui
             foreach (var cap in _receiver.Capabilities.OrderBy(x => x.FeatureId))
                 sb.AppendLine(cap.FeatureId + " | " + cap.Status + " | read " +
                     Permission(cap.CanRead) + " | write " + Permission(cap.CanWrite) +
-                    " | " + cap.Evidence);
+                    " | execute " + Permission(cap.CanExecute) + " | " + cap.Evidence);
             return sb.ToString();
         }
 
@@ -711,12 +711,24 @@ namespace YamahaAvrNet.TesterGui
                     sb.AppendLine("Native command identifiers: " +
                         string.Join(", ", description.CommandIdentifiers));
             }
+            var diagnostic = _receiver.LegacyDescriptorDiagnostic;
+            if (diagnostic != null)
+                foreach (var attempt in diagnostic.Attempts)
+                    sb.AppendLine("  " + attempt.Path + " | " + attempt.Status +
+                        (attempt.HttpStatusCode.HasValue ? " | HTTP " + attempt.HttpStatusCode : "") +
+                        " | " + attempt.Detail);
             sb.AppendLine();
-            sb.AppendLine("Function routes (advertised / observed metadata only):");
+            sb.AppendLine("Function routes (implemented / advertised / verified; evidence only):");
             foreach (var route in _receiver.FunctionRoutes.OrderBy(x => x.FunctionId)
                 .ThenBy(x => x.Protocol))
                 sb.AppendLine(route.FunctionId + " | " + route.Protocol + " | " +
-                    route.NativeIdentifier + " | " + route.Status + " | " + route.ReportedBy);
+                    route.NativeIdentifier + " | " + route.Status +
+                    " | impl R/W/E=" + (route.ImplementedRead ? "Y" : "-") + "/" +
+                    (route.ImplementedWrite ? "Y" : "-") + "/" +
+                    (route.ImplementedExecute ? "Y" : "-") +
+                    " | verified R/W/E=" + Permission(route.CanRead) + "/" +
+                    Permission(route.CanWrite) + "/" + Permission(route.CanExecute) +
+                    " | " + route.ReportedBy);
             sb.AppendLine("A route does not grant write permission or guarantee a typed operation.");
             return sb.ToString();
         }

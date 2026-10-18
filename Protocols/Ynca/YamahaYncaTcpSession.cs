@@ -46,6 +46,7 @@ namespace YamahaAvrNet.Protocols.Ynca
 
         internal event EventHandler<YamahaYncaMessageEventArgs> MessageReceived;
         internal event EventHandler<YamahaYncaConnectionEventArgs> ConnectionChanged;
+        internal event Action<YamahaYncaMessage> ReadSucceeded;
 
         internal bool IsConnected
         {
@@ -158,6 +159,8 @@ namespace YamahaAvrNet.Protocols.Ynca
                             throw new YamahaFeatureTemporarilyUnavailableException("YNCA request was restricted by the receiver.");
                         if (message.Kind == YamahaYncaMessageKind.Undefined)
                             throw new YamahaFeatureNotSupportedException("YNCA request was undefined on this receiver.");
+                        var onRead = ReadSucceeded;
+                        if (onRead != null) onRead(message);
                         return message;
                     }
                 }
@@ -249,6 +252,8 @@ namespace YamahaAvrNet.Protocols.Ynca
                                 throw new YamahaFeatureTemporarilyUnavailableException("YNCA readback was restricted.");
                             if (response.Kind == YamahaYncaMessageKind.Undefined)
                                 throw new YamahaFeatureNotSupportedException("YNCA readback was undefined.");
+                            var onRead = ReadSucceeded;
+                            if (onRead != null) onRead(response);
                             return response;
                         }
                         finally

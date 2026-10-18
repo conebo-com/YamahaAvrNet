@@ -41,9 +41,9 @@ namespace YamahaAvrNet.Discovery
             _http.Timeout = Timeout.InfiniteTimeSpan;
         }
 
-        internal async Task<YamahaLegacyDescriptor> ReadAsync(CancellationToken cancellationToken)
+        internal async Task<YamahaDescriptorProbeResult> ProbeAsync(CancellationToken cancellationToken)
         {
-            Exception firstFailure = null;
+            var attempts = new List<YamahaDescriptorAttempt>();
             foreach (string path in new[] {
                 "/YamahaRemoteControl/desc.xml", "/YamahaRemoteControl/UnitDesc.xml" })
             {
@@ -51,20 +51,76 @@ namespace YamahaAvrNet.Discovery
                 try
                 {
                     string xml = await ReadDocumentAsync(path, cancellationToken).ConfigureAwait(false);
-                    return Parse(xml, path);
+                    YamahaLegacyDescriptor parsed = Parse(xml, path);
+                    attempts.Add(new YamahaDescriptorAttempt(path,
+                        YamahaDescriptorAttemptStatus.Found, 200, "Recognized Yamaha legacy description XML."));
+                    return new YamahaDescriptorProbeResult(parsed,
+                        new YamahaLegacyDescriptorDiagnostic(attempts, DateTimeOffset.UtcNow));
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     throw;
                 }
-                catch (Exception ex) when (ex is HttpRequestException || ex is XmlException ||
-                    ex is InvalidDataException || ex is DecoderFallbackException ||
-                    ex is OperationCanceledException)
+                catch (DescriptorHttpStatusException ex)
                 {
-                    if (firstFailure == null) firstFailure = ex;
+                    var status = ex.StatusCode == 404 || ex.StatusCode == 410 ?
+                        YamahaDescriptorAttemptStatus.NotFound : YamahaDescriptorAttemptStatus.HttpError;
+                    attempts.Add(new YamahaDescriptorAttempt(path, status, ex.StatusCode,
+                        "HTTP " + ex.StatusCode));
+                }
+                catch (XmlException ex)
+                {
+                    attempts.Add(new YamahaDescriptorAttempt(path,
+                        YamahaDescriptorAttemptStatus.InvalidXml, null, ex.Message));
+                }
+                catch (InvalidDataException ex)
+                {
+                    var status = ex.Message.StartsWith("Response is not", StringComparison.Ordinal) ?
+                        YamahaDescriptorAttemptStatus.UnrecognizedDescription :
+                        YamahaDescriptorAttemptStatus.InvalidContent;
+                    attempts.Add(new YamahaDescriptorAttempt(path, status, null, ex.Message));
+                }
+                catch (DecoderFallbackException ex)
+                {
+                    attempts.Add(new YamahaDescriptorAttempt(path,
+                        YamahaDescriptorAttemptStatus.InvalidContent, null, ex.Message));
+                }
+                catch (OperationCanceledException)
+                {
+                    attempts.Add(new YamahaDescriptorAttempt(path,
+                        YamahaDescriptorAttemptStatus.Timeout, null, "Request timed out."));
+                }
+                catch (HttpRequestException ex)
+                {
+                    attempts.Add(new YamahaDescriptorAttempt(path,
+                        YamahaDescriptorAttemptStatus.NetworkError, null, ex.Message));
+                }
+                catch (IOException ex)
+                {
+                    attempts.Add(new YamahaDescriptorAttempt(path,
+                        YamahaDescriptorAttemptStatus.NetworkError, null, ex.Message));
                 }
             }
-            throw new InvalidDataException("No valid legacy XML description was retrieved.", firstFailure);
+            return new YamahaDescriptorProbeResult(null,
+                new YamahaLegacyDescriptorDiagnostic(attempts, DateTimeOffset.UtcNow));
+        }
+
+        internal sealed class YamahaDescriptorProbeResult
+        {
+            internal YamahaDescriptorProbeResult(YamahaLegacyDescriptor descriptor,
+                YamahaLegacyDescriptorDiagnostic diagnostic)
+            {
+                Descriptor = descriptor;
+                Diagnostic = diagnostic;
+            }
+            internal YamahaLegacyDescriptor Descriptor { get; private set; }
+            internal YamahaLegacyDescriptorDiagnostic Diagnostic { get; private set; }
+        }
+
+        private sealed class DescriptorHttpStatusException : Exception
+        {
+            internal DescriptorHttpStatusException(int statusCode) { StatusCode = statusCode; }
+            internal int StatusCode { get; private set; }
         }
 
         private async Task<string> ReadDocumentAsync(string path, CancellationToken ct)
@@ -78,7 +134,7 @@ namespace YamahaAvrNet.Discovery
                     HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false))
                 {
                     if (!response.IsSuccessStatusCode)
-                        throw new HttpRequestException(path + " returned HTTP " + (int)response.StatusCode + ".");
+                        throw new DescriptorHttpStatusException((int)response.StatusCode);
                     if (response.Content.Headers.ContentLength > MaxBytes)
                         throw new InvalidDataException("Descriptor exceeded maximum length.");
                     using (var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))

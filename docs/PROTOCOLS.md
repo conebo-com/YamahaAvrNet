@@ -213,3 +213,28 @@ option lists. Phase 5.3 exposes descriptive per-protocol function routes;
 these are not directly invocable operations. YNCA-only models can produce
 read-verified `PWR` routes for zones positively observed by the bounded
 read-only probe. No write probes or automatic changes were added.
+
+## Phase 5.4: Native function routes and diagnostic selection
+
+Native functions are represented as separate routes per protocol. A logical
+feature such as `zone.main.power` may have an advertised Extended Control
+entry and a separately observed YNCA `MAIN:PWR` entry. They do not become the
+same wire command: protocol spelling, value representation, response handling,
+and safety validation remain specific to each backend.
+
+`FunctionRoutes` preserves both *implementation knowledge* and *receiver
+observations*. An unverified implemented command has unknown permissions.
+Successful explicit YNCA GETs and legacy aggregate speaker reads add read
+evidence; individually forbidden legacy XML leaf GETs must never be inferred
+from the aggregate response. Successful controller readbacks can add write
+evidence on the current client instance only. Scene responses are represented
+as accepted actions, not state readbacks.
+
+`GetPreferredVerifiedRoute` chooses a verified metadata route deterministically,
+but does not issue requests, substitute backends within controllers, or change
+opt-in write restrictions. Future protocol fallbacks must preserve their own
+argument validation and non-idempotent operation safeguards.
+
+The optional descriptor probe records HTTP errors, missing files, parsing
+failures and timeouts separately. A missing descriptor cannot invalidate
+verified speaker XML commands or other legacy features.

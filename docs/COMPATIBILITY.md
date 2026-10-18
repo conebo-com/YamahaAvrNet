@@ -12,7 +12,7 @@ This document distinguishes **observed receiver behavior** from **features curre
 - A temporary YNCA discovery connection is closed after probing; explicit `Ynca.ConnectAsync()` remains necessary for ongoing notifications.
 - Without Extended Control, firmware/API version, supported inputs, sound programs, scene counts, dB range and speaker pattern count remain unknown. No fallback profile invents these values.
 - Phase 5.2 was exercised on the RX-A3060: ExtendedControl, LegacyXml and YNCA were all reported `Available`; four zones and two patterns were detected. This validates the reference model, **not** other models.
-- Phase 5.3 adds optional bounded `desc.xml` / `UnitDesc.xml` GET metadata and descriptive native function routes. This new code has **not** yet been executed on the receiver. Its absence or incompleteness does not establish a missing function.
+- Phase 5.3 adds optional bounded `desc.xml` / `UnitDesc.xml` GET metadata and descriptive native function routes. The RX-A3060 console run confirmed 69 routes and an unavailable/unverified descriptor. Its absence or incompleteness does not establish a missing function.
 - Model-specific profile resolution remains future work; the RX-A3060's descriptor was observed to omit working speaker paths.
 
 ## Capability terminology
@@ -90,3 +90,21 @@ Live RX-A3060 YNCA readback also observed `MAIN:SOUNDPRG=The Bottom Line`, `MAIN
 
 Read-only discovery does not authorize write probing, and user-reported success
 for prior Power/Volume/Mute/Input control is not evidence for the new sound paths.
+
+### Phase 5.3 RX-A3060 run and Phase 5.4 implementation
+
+The user ran the Phase 5.3 console against RX-A3060 firmware 2.86 and observed
+69 advertised/verified native routes (65 Extended Control entries and 4 YNCA
+zone-power read observations). All three enabled protocols were available.
+Both `/YamahaRemoteControl/desc.xml` and optional descriptor discovery remain
+unverified or unavailable; no inference is made about working legacy speaker
+paths.
+
+Phase 5.4 extends the route catalog to **known library commands**, additional
+runtime YNCA GETs, Extended Control sound status reads, and successful legacy
+speaker block reads. It separately exposes implemented operations and verified
+permissions. Writes remain disabled by default; successful controller readbacks
+or accepted scene actions are recorded for the *current client instance* only.
+The historical limited RX-A3060 speaker write evidence does not authorize writes
+to any other model/firmware/pattern/channel. Phase 5.4 has not yet been built on
+Windows or exercised on receiver hardware.
