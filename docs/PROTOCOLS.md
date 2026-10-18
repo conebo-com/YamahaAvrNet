@@ -4,6 +4,16 @@ This document records publicly useful protocol behavior and historical receiver 
 
 YamahaAvrNet is designed to use three protocol families together when available. The implementation includes Extended Control system discovery and the Phase 5.1 zone getStatus/sound/scene endpoints, legacy XML speaker GETs and limited opt-in verified-scope PUTs, plus a shared YNCA TCP session with typed zone status and optional guarded zone writes. Unverified functions remain disabled.
 
+## Independent protocol discovery
+
+`YamahaAvrClient.InitializeAsync()` checks enabled protocols separately without any write operation:
+
+1. Extended Control `getDeviceInfo`, then `getFeatures` and `getFuncStatus` independently (partial information is retained when later calls fail).
+2. Legacy XML `System/Speaker_Preout/Pattern_Sel` aggregate GET (a successful parsed response only establishes this individual read path).
+3. YNCA TCP `SYS:MODELNAME` GET and, when Extended zone lists are unavailable, `PWR` GET for known candidate subunits `MAIN`, `ZONE2`, `ZONE3`, `ZONE4`.
+
+A successful protocol probe is recorded as `Available`. Failures and timeouts are `Unavailable` (not equivalent to `KnownUnsupported`). A disabled protocol is `Disabled`. Only read-verified commands become capabilities; write rights are not inferred. YNCA discovery closes the temporary connection unless the application already had one open. The protocol does not provide universal introspection of every command. The legacy `desc.xml` is incomplete and is not currently parsed.
+
 ## 1. YNCA (TCP / optionally serial)
 
 - Typical TCP port: **50000**, configurable where the receiver permits it.

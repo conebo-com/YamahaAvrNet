@@ -61,39 +61,53 @@ namespace YamahaAvrNet.Sample
                 var features = receiver.DeviceFeatures;
                 var status = receiver.FunctionStatus;
 
-                Console.WriteLine("Model: " + Show(info.ModelName));
-                Console.WriteLine("Firmware: " + Show(info.SystemVersion));
-                Console.WriteLine("Extended Control API: " + Show(info.ApiVersion));
-                Console.WriteLine("Reported zones: " + Show(features.ReportedZoneCount));
-                Console.WriteLine("Reported speaker patterns: " + Show(features.SpeakerPatternCount));
-                Console.WriteLine("Active speaker pattern (Extended): " + Show(status.ActiveSpeakerPattern));
+                Console.WriteLine("Model: " + Show(receiver.Model));
+                Console.WriteLine("Firmware: " + Show(info == null ? null : info.SystemVersion));
+                Console.WriteLine("Extended Control API: " + Show(info == null ? null : info.ApiVersion));
+                Console.WriteLine("Protocol discovery (read-only):");
+                foreach (var protocol in receiver.Protocols.Values.OrderBy(x => x.Protocol))
+                    Console.WriteLine("  " + protocol.Protocol + ": " + protocol.Availability +
+                        (string.IsNullOrEmpty(protocol.Detail) ? "" : " - " + protocol.Detail));
+                Console.WriteLine("Reported zones: " +
+                    Show(features == null ? (int?)null : features.ReportedZoneCount));
+                Console.WriteLine("Observed YNCA/Extended zones: " +
+                    string.Join(", ", receiver.Zones.Select(z => z.NativeId)));
+                Console.WriteLine("Reported speaker patterns: " +
+                    Show(features == null ? (int?)null : features.SpeakerPatternCount));
+                Console.WriteLine("Active speaker pattern (Extended): " +
+                    Show(status == null ? (int?)null : status.ActiveSpeakerPattern));
 
-                foreach (var zone in features.Zones)
-                    Console.WriteLine("Zone " + zone.NativeId + ": inputs=" + zone.Inputs.Count +
-                        ", sound programs=" + zone.SoundPrograms.Count +
-                        ", scenes=" + Show(zone.SceneCount));
-
-                if (Confirm("Read sound/DSP status and advertised scenes? [y/N]: "))
+                if (features != null)
                 {
                     foreach (var zone in features.Zones)
+                        Console.WriteLine("Zone " + zone.NativeId + ": inputs=" + zone.Inputs.Count +
+                            ", sound programs=" + zone.SoundPrograms.Count +
+                            ", scenes=" + Show(zone.SceneCount));
+                    if (receiver.Sound != null &&
+                        Confirm("Read sound/DSP status and advertised scenes? [y/N]: "))
                     {
-                        try
+                        foreach (var zone in features.Zones)
                         {
-                            YamahaSoundStatus sound = await receiver.Sound.GetStatusAsync(zone.NativeId);
-                            Console.WriteLine("Zone " + zone.NativeId + ": program=" + Show(sound.SoundProgramNativeId) +
-                                ", pure direct=" + ShowBool(sound.PureDirectEnabled) +
-                                ", enhancer=" + ShowBool(sound.EnhancerEnabled) +
-                                ", decoder=" + Show(sound.SurroundDecoderNativeId));
-                            Console.WriteLine("  Available programs: " + string.Join(", ",
-                                receiver.Sound.GetAdvertisedSoundPrograms(zone.NativeId)));
-                            Console.WriteLine("  Advertised scenes: " + Show(receiver.Sound.GetAdvertisedSceneCount(zone.NativeId)));
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine("  Zone " + zone.NativeId + " sound read unavailable: " + ex.Message);
+                            try
+                            {
+                                YamahaSoundStatus sound = await receiver.Sound.GetStatusAsync(zone.NativeId);
+                                Console.WriteLine("Zone " + zone.NativeId + ": program=" + Show(sound.SoundProgramNativeId) +
+                                    ", pure direct=" + ShowBool(sound.PureDirectEnabled) +
+                                    ", enhancer=" + ShowBool(sound.EnhancerEnabled) +
+                                    ", decoder=" + Show(sound.SurroundDecoderNativeId));
+                                Console.WriteLine("  Available programs: " + string.Join(", ",
+                                    receiver.Sound.GetAdvertisedSoundPrograms(zone.NativeId)));
+                                Console.WriteLine("  Advertised scenes: " +
+                                    Show(receiver.Sound.GetAdvertisedSceneCount(zone.NativeId)));
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine("  Zone " + zone.NativeId + " sound read unavailable: " + ex.Message);
+                            }
                         }
                     }
                 }
+                else Console.WriteLine("Extended Control feature lists unavailable; other protocols remain usable.");
 
                 if (!Confirm("Read legacy XML speaker settings? [y/N]: "))
                 {
@@ -111,23 +125,19 @@ namespace YamahaAvrNet.Sample
                     Console.WriteLine("Active pattern read failed: " + ex.Message);
                 }
 
-                int? count = features.SpeakerPatternCount;
+                int? count = features == null ? (int?)null : features.SpeakerPatternCount;
                 if (!count.HasValue || count.Value < 1 || count.Value > 32)
-                {
-                    Console.WriteLine("Pattern count not available. No automatic pattern enumeration.");
-                    await ReadYncaAsync(receiver);
-                    return 0;
-                }
-
+                    Console.WriteLine("Pattern count unknown; explicit reads do not imply pattern support.");
+                int upper = count.HasValue && count.Value >= 1 && count.Value <= 32 ? count.Value : 32;
                 while (true)
                 {
-                    Console.Write("Pattern to read [1-" + count.Value + "] (Enter to finish): ");
+                    Console.Write("Pattern to read [1-" + upper + "] (Enter to finish): ");
                     string selection = Console.ReadLine();
                     if (string.IsNullOrWhiteSpace(selection))
                         break;
                     int pattern;
                     if (!int.TryParse(selection.Trim(), NumberStyles.None,
-                        CultureInfo.InvariantCulture, out pattern) || pattern < 1 || pattern > count.Value)
+                        CultureInfo.InvariantCulture, out pattern) || pattern < 1 || pattern > upper)
                     {
                         Console.WriteLine("Enter a valid pattern number.");
                         continue;
@@ -142,6 +152,7 @@ namespace YamahaAvrNet.Sample
         private static async Task ReadYncaAsync(YamahaAvrClient receiver)
         {
             Console.WriteLine();
+            if (receiver.Ynca == null) return;
             if (!Confirm("Read YNCA status over TCP port 50000? [y/N]: ")) return;
             Console.WriteLine("YNCA only permits one connection on many receivers. Close other YNCA tools first.");
             try
@@ -159,7 +170,7 @@ namespace YamahaAvrNet.Sample
                 Console.WriteLine();
                 if (Confirm("Read the detected zones via YNCA? [y/N]: "))
                 {
-                    foreach (var feature in receiver.DeviceFeatures.Zones)
+                    foreach (var feature in receiver.Zones)
                     {
                         try
                         {

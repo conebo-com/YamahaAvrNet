@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using YamahaAvrNet.Discovery;
+using YamahaAvrNet.Exceptions;
 using YamahaAvrNet.Features.SpeakerSetup;
 using YamahaAvrNet.Features.Audio;
 using YamahaAvrNet.Features.Zones;
@@ -33,6 +34,12 @@ namespace YamahaAvrNet.PublicApi
         private readonly Dictionary<string, DateTimeOffset> _speakerVerifiedReads =
             new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         private IReadOnlyList<YamahaZoneInfo> _zones = EmptyZones;
+        private string _yncaModel;
+        private int? _legacyActivePattern;
+        private readonly Dictionary<string, YamahaProtocolProbe> _protocols =
+            new Dictionary<string, YamahaProtocolProbe>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, DateTimeOffset> _yncaVerifiedReads =
+            new Dictionary<string, DateTimeOffset>(StringComparer.OrdinalIgnoreCase);
         private YamahaConnectionState _connectionState = YamahaConnectionState.Disconnected;
         private YamahaExtendedDeviceInfo _deviceInfo;
         private YamahaExtendedFeatures _features;
@@ -55,13 +62,16 @@ namespace YamahaAvrNet.PublicApi
                 ? new YamahaYncaTcpSession(_options.Host, _options.YncaPort, _options.RequestTimeout) : null;
             Ynca = _yncaSession == null ? null : new YamahaYncaController(_yncaSession);
             _zoneController = _yncaSession == null ? null : new YamahaZoneController(
-                _yncaSession, () => DeviceFeatures, () => _disposed, _options.EnableYncaZoneWrites);
+                _yncaSession, () => DeviceFeatures, () => Zones,
+                () => _disposed, _options.EnableYncaZoneWrites);
             ZoneControl = _zoneController;
             Sound = _extendedHttp == null ? null : new YamahaSoundController(
                 _extendedHttp, _yncaSession, () => DeviceFeatures,
                 () => _disposed, _options.EnableSoundSceneWrites);
+            SetInitialProtocolStates();
             Speakers = new YamahaSpeakerSetupController(EnsureNotDisposed, _legacyXml,
-                GetReportedSpeakerPatternCount, GetExtendedActivePatternAsync,
+                GetReportedSpeakerPatternCount,
+                _extendedHttp == null ? null : (Func<CancellationToken, Task<int?>>)GetExtendedActivePatternAsync,
                 RecordSpeakerRead, () => Model,
                 () => DeviceInfo == null ? null : DeviceInfo.SystemVersion,
                 _options.EnableVerifiedSpeakerWrites);
@@ -72,12 +82,37 @@ namespace YamahaAvrNet.PublicApi
 
         public string Model
         {
-            get { lock (_stateSync) return _deviceInfo == null ? null : _deviceInfo.ModelName; }
+            get { lock (_stateSync) return _deviceInfo == null ? _yncaModel : _deviceInfo.ModelName; }
         }
 
         public YamahaConnectionState ConnectionState
         {
             get { lock (_stateSync) return _disposed ? YamahaConnectionState.Disposed : _connectionState; }
+        }
+
+        /// <summary>Per-protocol discovery results; unavailable never means unsupported.</summary>
+        public IReadOnlyDictionary<string, YamahaProtocolProbe> Protocols
+        {
+            get
+            {
+                EnsureNotDisposed();
+                lock (_stateSync)
+                    return new System.Collections.ObjectModel.ReadOnlyDictionary<string, YamahaProtocolProbe>(
+                        new Dictionary<string, YamahaProtocolProbe>(_protocols, StringComparer.OrdinalIgnoreCase));
+            }
+        }
+
+        public YamahaProtocolProbe GetProtocol(string protocol)
+        {
+            if (string.IsNullOrWhiteSpace(protocol))
+                throw new ArgumentException("Protocol name must not be empty.", nameof(protocol));
+            EnsureNotDisposed();
+            lock (_stateSync)
+            {
+                YamahaProtocolProbe result;
+                return _protocols.TryGetValue(protocol, out result) ? result :
+                    new YamahaProtocolProbe(protocol, YamahaProtocolAvailability.NotChecked, null, null);
+            }
         }
 
         public IReadOnlyList<YamahaZoneInfo> Zones
@@ -132,50 +167,23 @@ namespace YamahaAvrNet.PublicApi
             EnsureNotDisposed();
             lock (_stateSync)
                 return new YamahaReceiverState(_connectionState, _lastUpdatedUtc,
-                    _stale, _deviceInfo == null ? null : _deviceInfo.ModelName,
+                    _stale, _deviceInfo == null ? _yncaModel : _deviceInfo.ModelName,
                     _zoneController == null ? null : _zoneController.GetStates());
         }
 
         /// <summary>
-        /// Checks Extended Control reachability via getDeviceInfo. HTTP has no
-        /// persistent session, so Connected means the last device-info GET worked.
+        /// Runs read-only discovery against each enabled protocol. At least one
+        /// successful protocol suffices; a failed endpoint does not hide working ones.
+        /// YNCA is disconnected after probing so it does not monopolize port 50000.
         /// </summary>
-        public async Task ConnectAsync(CancellationToken cancellationToken = default(CancellationToken))
+        public Task ConnectAsync(CancellationToken cancellationToken = default(CancellationToken))
         {
-            EnsureExtendedAvailable();
-            await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                EnsureNotDisposed();
-                SetConnectionState(YamahaConnectionState.Connecting);
-                try
-                {
-                    var info = await _extendedHttp.GetDeviceInfoAsync(cancellationToken)
-                        .ConfigureAwait(false);
-                    lock (_stateSync)
-                    {
-                        UpdateIdentity(info);
-                        _connectionState = YamahaConnectionState.Connected;
-                        if (_features != null)
-                            _capabilities = BuildCapabilities(info, _features, _functionStatus);
-                    }
-                }
-                catch
-                {
-                    MarkFailure();
-                    throw;
-                }
-            }
-            finally { _lifecycleGate.Release(); }
+            return InitializeAsync(cancellationToken);
         }
 
-        /// <summary>
-        /// Reads device identity, reported features and system function status.
-        /// Discovery makes GET requests only and never switches a speaker pattern.
-        /// </summary>
         public async Task InitializeAsync(CancellationToken cancellationToken = default(CancellationToken))
         {
-            EnsureExtendedAvailable();
+            EnsureNotDisposed();
             await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -194,22 +202,17 @@ namespace YamahaAvrNet.PublicApi
             finally { _lifecycleGate.Release(); }
         }
 
-        /// <summary>Refreshes getFuncStatus; initializes when no features are cached.</summary>
+        /// <summary>Refresh Extended Control function status when available; otherwise rediscover.</summary>
         public async Task RefreshAsync(CancellationToken cancellationToken = default(CancellationToken))
         {
-            EnsureExtendedAvailable();
+            EnsureNotDisposed();
             await _lifecycleGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 EnsureNotDisposed();
-                try
+                if (_extendedHttp != null && _features != null && _deviceInfo != null)
                 {
-                    if (_features == null || _deviceInfo == null)
-                    {
-                        SetConnectionState(YamahaConnectionState.Connecting);
-                        await ReadInitializationAsync(cancellationToken).ConfigureAwait(false);
-                    }
-                    else
+                    try
                     {
                         var status = await _extendedHttp.GetFuncStatusAsync(cancellationToken)
                             .ConfigureAwait(false);
@@ -219,45 +222,241 @@ namespace YamahaAvrNet.PublicApi
                             _lastUpdatedUtc = status.ObservedUtc;
                             _stale = false;
                             _connectionState = YamahaConnectionState.Connected;
-                            _capabilities = BuildCapabilities(
-                                _deviceInfo, _features, status);
+                            _capabilities = BuildCapabilities(_deviceInfo, _features, status);
                         }
                     }
+                    catch
+                    {
+                        MarkFailure();
+                        throw;
+                    }
                 }
-                catch
+                else
                 {
-                    MarkFailure();
-                    throw;
+                    SetConnectionState(YamahaConnectionState.Connecting);
+                    try { await ReadInitializationAsync(cancellationToken).ConfigureAwait(false); }
+                    catch { MarkFailure(); throw; }
                 }
             }
             finally { _lifecycleGate.Release(); }
         }
 
+        private void SetInitialProtocolStates()
+        {
+            lock (_stateSync)
+            {
+                SetProbe("ExtendedControl", _extendedHttp == null ?
+                    YamahaProtocolAvailability.Disabled : YamahaProtocolAvailability.NotChecked, null);
+                SetProbe("LegacyXml", _legacyXml == null ?
+                    YamahaProtocolAvailability.Disabled : YamahaProtocolAvailability.NotChecked, null);
+                SetProbe("YNCA", _yncaSession == null ?
+                    YamahaProtocolAvailability.Disabled : YamahaProtocolAvailability.NotChecked, null);
+            }
+        }
+
+        // Caller must hold _stateSync.
+        private void SetProbe(string protocol, YamahaProtocolAvailability availability, string detail)
+        {
+            _protocols[protocol] = new YamahaProtocolProbe(protocol, availability, detail,
+                availability == YamahaProtocolAvailability.Disabled ||
+                availability == YamahaProtocolAvailability.NotChecked ?
+                (DateTimeOffset?)null : DateTimeOffset.UtcNow);
+        }
+
         private async Task ReadInitializationAsync(CancellationToken ct)
         {
-            var info = await _extendedHttp.GetDeviceInfoAsync(ct).ConfigureAwait(false);
-            lock (_stateSync) UpdateIdentity(info);
-            var features = await _extendedHttp.GetFeaturesAsync(ct).ConfigureAwait(false);
-            var zones = new List<YamahaZoneInfo>();
-            foreach (var zone in features.Zones)
-                zones.Add(new YamahaZoneInfo(zone.NativeId, zone.NativeId));
+            // Clear instance-bound discovery before accepting evidence from this run.
+            lock (_stateSync)
+            {
+                _deviceInfo = null;
+                _features = null;
+                _functionStatus = null;
+                _yncaModel = null;
+                _legacyActivePattern = null;
+                _lastUpdatedUtc = null;
+                _zones = EmptyZones;
+                _speakerVerifiedReads.Clear();
+                _yncaVerifiedReads.Clear();
+                _capabilities = new YamahaDeviceCapabilities(new YamahaCapability[0]);
+                SetInitialProtocolStates();
+            }
+            int success = 0;
+            int failures = 0;
+            var diagnostics = new List<string>();
+
+            if (_extendedHttp != null)
+            {
+                try
+                {
+                    var info = await _extendedHttp.GetDeviceInfoAsync(ct).ConfigureAwait(false);
+                    lock (_stateSync) UpdateIdentity(info);
+                    success++;
+                    var partial = new List<string>();
+                    try
+                    {
+                        var features = await _extendedHttp.GetFeaturesAsync(ct).ConfigureAwait(false);
+                        lock (_stateSync)
+                        {
+                            _features = features;
+                            var zones = new List<YamahaZoneInfo>();
+                            foreach (var zone in features.Zones)
+                                zones.Add(new YamahaZoneInfo(zone.NativeId, zone.NativeId));
+                            _zones = zones.AsReadOnly();
+                            _lastUpdatedUtc = features.ObservedUtc;
+                        }
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception ex) { partial.Add("getFeatures: " + ex.Message); }
+                    try
+                    {
+                        var status = await _extendedHttp.GetFuncStatusAsync(ct).ConfigureAwait(false);
+                        lock (_stateSync)
+                        {
+                            _functionStatus = status;
+                            _lastUpdatedUtc = status.ObservedUtc;
+                        }
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception ex) { partial.Add("getFuncStatus: " + ex.Message); }
+                    lock (_stateSync) SetProbe("ExtendedControl", YamahaProtocolAvailability.Available,
+                        partial.Count == 0 ? "Device info, features and function status read." :
+                        "Device info available; " + string.Join("; ", partial));
+                    if (partial.Count != 0) { failures++; diagnostics.AddRange(partial); }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex)
+                {
+                    failures++;
+                    diagnostics.Add("ExtendedControl: " + ex.Message);
+                    lock (_stateSync) SetProbe("ExtendedControl", YamahaProtocolAvailability.Unavailable, ex.Message);
+                }
+            }
+
+            // Legacy XML can be present on a receiver without Extended Control.
+            // Probe only the already implemented read-only Pattern_Sel GET.
+            if (_legacyXml != null)
+            {
+                try
+                {
+                    string xml = await _legacyXml.SendGetAsync(
+                        YamahaLegacyXmlCommandBuilder.ActivePattern(), ct).ConfigureAwait(false);
+                    int? pattern = YamahaLegacyXmlResponseParser.ParseActivePattern(xml);
+                    lock (_stateSync)
+                    {
+                        _legacyActivePattern = pattern;
+                        SetProbe("LegacyXml", YamahaProtocolAvailability.Available,
+                            pattern.HasValue ? "Active speaker pattern read." : "XML GET succeeded; pattern unknown.");
+                    }
+                    success++;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex)
+                {
+                    failures++;
+                    diagnostics.Add("LegacyXml: " + ex.Message);
+                    lock (_stateSync) SetProbe("LegacyXml", YamahaProtocolAvailability.Unavailable, ex.Message);
+                }
+            }
+
+            if (_yncaSession != null)
+            {
+                bool originallyConnected = _yncaSession.IsConnected;
+                try
+                {
+                    // One native model query verifies YNCA read capability. Lack of this
+                    // particular function does NOT prove the protocol unsupported.
+                    await _yncaSession.ConnectAsync(ct).ConfigureAwait(false);
+                    bool verifiedYnca = false;
+                    string note = "TCP connection established; YNCA commands not yet verified.";
+                    try
+                    {
+                        var model = await _yncaSession.GetAsync("SYS", "MODELNAME", ct)
+                            .ConfigureAwait(false);
+                        lock (_stateSync)
+                        {
+                            _yncaModel = model.Value;
+                            _yncaVerifiedReads["ynca.sys.modelname"] = model.ReceivedUtc;
+                        }
+                        verifiedYnca = true;
+                        note = "SYS:MODELNAME read.";
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (YamahaFeatureNotSupportedException)
+                    {
+                        verifiedYnca = true; // Native @UNDEFINED is itself a YNCA response.
+                        note = "YNCA answered @UNDEFINED to SYS:MODELNAME.";
+                    }
+                    catch (YamahaFeatureTemporarilyUnavailableException)
+                    {
+                        verifiedYnca = true; // Native @RESTRICTED is itself a YNCA response.
+                        note = "YNCA answered @RESTRICTED to SYS:MODELNAME.";
+                    }
+                    catch (Exception ex)
+                    {
+                        note += " SYS:MODELNAME unavailable: " + ex.Message;
+                    }
+                    // If Extended Control cannot enumerate zones, attempt a safe,
+                    // bounded read of the known native YNCA subunits. Never invent zones.
+                    if (_features == null)
+                    {
+                        var found = new List<YamahaZoneInfo>();
+                        foreach (string zone in new[] { "MAIN", "ZONE2", "ZONE3", "ZONE4" })
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            try
+                            {
+                                var power = await _yncaSession.GetAsync(zone, "PWR", ct)
+                                    .ConfigureAwait(false);
+                                verifiedYnca = true;
+                                found.Add(new YamahaZoneInfo(zone.ToLowerInvariant(), zone.ToLowerInvariant()));
+                                lock (_stateSync)
+                                    _yncaVerifiedReads["ynca." + zone.ToLowerInvariant() + ".pwr"] = power.ReceivedUtc;
+                            }
+                            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                            catch (YamahaFeatureNotSupportedException) { verifiedYnca = true; }
+                            catch (YamahaFeatureTemporarilyUnavailableException) { verifiedYnca = true; }
+                            catch (Exception)
+                            {
+                                // No answer is not a negative capability assertion.
+                                // An unsupported PWR query does not prove absent zone.
+                            }
+                        }
+                        lock (_stateSync) _zones = found.AsReadOnly();
+                    }
+                    lock (_stateSync) SetProbe("YNCA", verifiedYnca ?
+                        YamahaProtocolAvailability.Available : YamahaProtocolAvailability.Unavailable, note);
+                    if (verifiedYnca) success++;
+                    else
+                    {
+                        failures++;
+                        diagnostics.Add("YNCA: TCP reachable but no native protocol reply observed.");
+                    }
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception ex)
+                {
+                    failures++;
+                    diagnostics.Add("YNCA: " + ex.Message);
+                    lock (_stateSync) SetProbe("YNCA", YamahaProtocolAvailability.Unavailable, ex.Message);
+                }
+                finally
+                {
+                    if (!originallyConnected)
+                        _yncaSession.Disconnect();
+                }
+            }
 
             lock (_stateSync)
             {
-                _features = features;
-                _zones = zones.AsReadOnly();
-                _lastUpdatedUtc = features.ObservedUtc;
-                _capabilities = BuildCapabilities(info, features, null);
+                _capabilities = BuildCapabilities(_deviceInfo, _features, _functionStatus);
+                _lastUpdatedUtc = DateTimeOffset.UtcNow;
+                _stale = success == 0;
+                _connectionState = success == 0 ? YamahaConnectionState.Faulted :
+                    failures > 0 ? YamahaConnectionState.PartiallyConnected : YamahaConnectionState.Connected;
             }
-            var status = await _extendedHttp.GetFuncStatusAsync(ct).ConfigureAwait(false);
-            lock (_stateSync)
-            {
-                _functionStatus = status;
-                _lastUpdatedUtc = status.ObservedUtc;
-                _capabilities = BuildCapabilities(info, features, status);
-                _stale = false;
-                _connectionState = YamahaConnectionState.Connected;
-            }
+            if (success == 0)
+                throw new YamahaConnectionException("No enabled Yamaha protocol could be reached. " +
+                    string.Join(" | ", diagnostics));
         }
 
         public async Task DisconnectAsync(CancellationToken cancellationToken = default(CancellationToken))
@@ -319,11 +518,34 @@ namespace YamahaAvrNet.PublicApi
         {
             var known = new List<YamahaCapability>(
                 YamahaExtendedCapabilityMapper.Build(device, features, status).All);
+            foreach (var probe in _protocols.Values)
+            {
+                if (probe.Availability != YamahaProtocolAvailability.Available) continue;
+                known.Add(new YamahaCapability("protocol." + probe.Protocol.ToLowerInvariant(),
+                    YamahaCapabilityStatus.ReadVerified, YamahaEvidenceSource.ReadProbe,
+                    canRead: true, protocol: probe.Protocol,
+                    model: device == null ? _yncaModel : device.ModelName,
+                    firmware: device == null ? null : device.SystemVersion,
+                    lastVerifiedUtc: probe.ObservedUtc));
+            }
+            if (_legacyActivePattern.HasValue &&
+                (status == null || !status.ActiveSpeakerPattern.HasValue))
+                known.Add(new YamahaCapability("legacy.speaker.active_pattern",
+                    YamahaCapabilityStatus.ReadVerified, YamahaEvidenceSource.ReadProbe,
+                    canRead: true, protocol: "LegacyXml",
+                    model: device == null ? _yncaModel : device.ModelName,
+                    lastVerifiedUtc: _protocols["LegacyXml"].ObservedUtc));
+            foreach (var pair in _yncaVerifiedReads)
+                known.Add(new YamahaCapability(pair.Key, YamahaCapabilityStatus.ReadVerified,
+                    YamahaEvidenceSource.ReadProbe, canRead: true, protocol: "YNCA",
+                    model: device == null ? _yncaModel : device.ModelName,
+                    firmware: device == null ? null : device.SystemVersion,
+                    lastVerifiedUtc: pair.Value));
             foreach (var pair in _speakerVerifiedReads)
                 known.Add(new YamahaCapability(pair.Key,
                     YamahaCapabilityStatus.ReadVerified, YamahaEvidenceSource.ReadProbe,
                     canRead: true, protocol: "LegacyXml",
-                    model: device == null ? null : device.ModelName,
+                    model: device == null ? _yncaModel : device.ModelName,
                     firmware: device == null ? null : device.SystemVersion,
                     lastVerifiedUtc: pair.Value));
             return new YamahaDeviceCapabilities(known);
@@ -357,7 +579,7 @@ namespace YamahaAvrNet.PublicApi
             EnsureNotDisposed();
             if (_extendedHttp == null)
                 throw new NotSupportedException(
-                    "Extended Control is disabled. No other network protocol is implemented yet.");
+                    "Extended Control is disabled; use Legacy XML or YNCA when available.");
         }
 
         private void EnsureNotDisposed()

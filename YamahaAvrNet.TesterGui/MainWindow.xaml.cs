@@ -30,6 +30,7 @@ namespace YamahaAvrNet.TesterGui
             var commands = new List<TesterCommand>
             {
                 new TesterCommand("Overview", "Receiver summary", "summary"),
+                new TesterCommand("Overview", "Protocol discovery results", "protocols"),
                 new TesterCommand("Overview", "Refresh function status", "refresh"),
                 new TesterCommand("Overview", "Available zones and sources", "zones"),
                 new TesterCommand("Overview", "Capabilities and evidence", "capabilities"),
@@ -101,7 +102,7 @@ namespace YamahaAvrNet.TesterGui
                 });
                 TxtConnectionStatus.Text = "Connecting...";
                 await next.InitializeAsync();
-                AppendHttp("Discovery completed: GET getDeviceInfo, getFeatures, getFuncStatus");
+                AppendHttp("Read-only multi-protocol discovery completed; inspect Protocol discovery results.");
                 var old = _receiver;
                 if (old != null && old.Ynca != null)
                 {
@@ -183,7 +184,7 @@ namespace YamahaAvrNet.TesterGui
             BeginOperation();
             try
             {
-                AppendHttp("GET /YamahaExtendedControl/v1/system/getFuncStatus");
+                AppendHttp("Refresh: Extended function status or multi-protocol rediscovery");
                 await _receiver.RefreshAsync();
                 AppendResult(BuildSummary());
             }
@@ -382,11 +383,14 @@ namespace YamahaAvrNet.TesterGui
                     case "ynca-custom":
                         await DisplayYncaGetAsync(TxtYncaSubunit.Text.Trim(), TxtYncaFunction.Text.Trim());
                         break;
+                    case "protocols":
+                        AppendResult(BuildProtocols());
+                        break;
                     case "summary":
                         AppendResult(BuildSummary());
                         break;
                     case "refresh":
-                        AppendHttp("GET /YamahaExtendedControl/v1/system/getFuncStatus");
+                        AppendHttp("Refresh: Extended function status or protocol rediscovery");
                         await _receiver.RefreshAsync();
                         AppendResult(BuildSummary());
                         break;
@@ -637,7 +641,7 @@ namespace YamahaAvrNet.TesterGui
             var info = _receiver.DeviceInfo;
             var features = _receiver.DeviceFeatures;
             var status = _receiver.FunctionStatus;
-            return "Receiver: " + Show(info == null ? null : info.ModelName) +
+            return "Receiver: " + Show(_receiver.Model) +
                 "\nFirmware: " + Show(info == null ? null : info.SystemVersion) +
                 "\nExtended Control API: " + Show(info == null ? null : info.ApiVersion) +
                 "\nReported zones: " + Show(features == null ? (int?)null : features.ReportedZoneCount) +
@@ -645,6 +649,8 @@ namespace YamahaAvrNet.TesterGui
                 "\nActive pattern (Extended): " + Show(status == null ? (int?)null : status.ActiveSpeakerPattern) +
                 "\nConnection state: " + _receiver.ConnectionState +
                 "\nYNCA TCP connected: " + (_receiver.Ynca != null && _receiver.Ynca.IsConnected) +
+                "\nProtocols: " + string.Join(", ", _receiver.Protocols.Values
+                    .OrderBy(x => x.Protocol).Select(x => x.Protocol + "=" + x.Availability)) +
                 "\n\nSpeaker settings are addressable values, not proof of configured speakers.";
         }
 
@@ -652,7 +658,9 @@ namespace YamahaAvrNet.TesterGui
         {
             var features = _receiver.DeviceFeatures;
             if (features == null)
-                return "Discover receiver features first.";
+                return "Extended Control features unavailable. Observed YNCA zones: " +
+                    string.Join(", ", _receiver.Zones.Select(x => x.NativeId)) +
+                    ". Inputs, scenes and writable ranges remain unknown.";
             var sb = new StringBuilder();
             foreach (var zone in features.Zones)
             {
@@ -660,6 +668,16 @@ namespace YamahaAvrNet.TesterGui
                 sb.AppendLine("  Inputs: " + string.Join(", ", zone.Inputs));
                 sb.AppendLine("  Sound programs: " + string.Join(", ", zone.SoundPrograms));
             }
+            return sb.ToString();
+        }
+
+        private string BuildProtocols()
+        {
+            var sb = new StringBuilder();
+            foreach (var probe in _receiver.Protocols.Values.OrderBy(x => x.Protocol))
+                sb.AppendLine(probe.Protocol + " | " + probe.Availability +
+                    " | " + (probe.Detail ?? "not probed"));
+            sb.AppendLine("Unavailable is not proof of permanent lack of support.");
             return sb.ToString();
         }
 

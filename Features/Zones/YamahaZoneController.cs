@@ -21,6 +21,7 @@ namespace YamahaAvrNet.Features.Zones
         private static readonly string[] ReadFields = { "PWR", "VOL", "MUTE", "INP" };
         private readonly YamahaYncaTcpSession _session;
         private readonly Func<YamahaExtendedFeatures> _features;
+        private readonly Func<IReadOnlyList<YamahaZoneInfo>> _discoveredZones;
         private readonly Func<bool> _isDisposed;
         private readonly bool _allowWrites;
         private readonly object _sync = new object();
@@ -29,10 +30,13 @@ namespace YamahaAvrNet.Features.Zones
         private bool _disposed;
 
         internal YamahaZoneController(YamahaYncaTcpSession session,
-            Func<YamahaExtendedFeatures> features, Func<bool> isDisposed, bool allowWrites)
+            Func<YamahaExtendedFeatures> features,
+            Func<IReadOnlyList<YamahaZoneInfo>> discoveredZones,
+            Func<bool> isDisposed, bool allowWrites)
         {
             _session = session ?? throw new ArgumentNullException(nameof(session));
             _features = features ?? throw new ArgumentNullException(nameof(features));
+            _discoveredZones = discoveredZones ?? throw new ArgumentNullException(nameof(discoveredZones));
             _isDisposed = isDisposed ?? throw new ArgumentNullException(nameof(isDisposed));
             _allowWrites = allowWrites;
             _session.MessageReceived += SessionOnMessageReceived;
@@ -129,6 +133,9 @@ namespace YamahaAvrNet.Features.Zones
 
         private async Task WriteAsync(string zoneId, string field, string requested, CancellationToken ct)
         {
+            // Write validation needs reported Extended Control metadata; a YNCA-only
+            // zone read does not authorize writing on an unprofiled receiver.
+            RequireZoneFeature(zoneId);
             string subunit = RequireZone(zoneId).ToUpperInvariant();
             if (!_allowWrites)
                 throw new YamahaValidationException("YNCA writes are disabled. Set EnableYncaZoneWrites explicitly.");
@@ -143,7 +150,20 @@ namespace YamahaAvrNet.Features.Zones
 
         private string RequireZone(string id)
         {
-            return RequireZoneFeature(id).NativeId;
+            EnsureAvailable();
+            if (string.IsNullOrWhiteSpace(id))
+                throw new YamahaValidationException("Zone ID is required.");
+            string native = id.Trim();
+            if (!string.Equals(native, "main", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(native, "zone2", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(native, "zone3", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(native, "zone4", StringComparison.OrdinalIgnoreCase))
+                throw new YamahaFeatureNotSupportedException("No known YNCA mapping for zone " + native + ".");
+            foreach (var zone in _discoveredZones())
+                if (string.Equals(zone.NativeId, native, StringComparison.OrdinalIgnoreCase))
+                    return zone.NativeId;
+            throw new YamahaFeatureNotSupportedException(
+                "No successful discovery observation for zone " + native + ".");
         }
 
         private YamahaExtendedZoneFeatures RequireZoneFeature(string zoneId)

@@ -4,6 +4,16 @@ This document distinguishes **observed receiver behavior** from **features curre
 
 **Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker aggregate GETs are implemented and have now been exercised successfully on the user's RX-A3060 (firmware 2.86): both patterns returned 13 native level/distance channels. The Phase 3.2 C# implementation adds narrowly restricted opt-in PUT for Pattern 1 / `Front_L`; this new writer has not yet been exercised on the receiver. YNCA TCP GETs have been observed in an interactive C# RX-A3060 run. The user subsequently reported the Phase 4.2 GUI controls working on RX-A3060; exact tested zone/function combinations were not enumerated.
 
+## Multi-protocol discovery (implementation, not yet hardware-validated)
+
+- Initialization no longer requires Extended Control: each enabled endpoint is probed with read-only commands independently. At least one usable endpoint is sufficient.
+- `receiver.Protocols` reports availability for `ExtendedControl`, `LegacyXml`, and `YNCA`, with details. `Unavailable` is **not** a claim of permanent incompatibility.
+- YNCA-only discovery can identify `SYS:MODELNAME` and discover a zone **only after** its `PWR` query returns a value. The four candidate subunit names are protocol knowledge, not assumed existing zones.
+- A temporary YNCA discovery connection is closed after probing; explicit `Ynca.ConnectAsync()` remains necessary for ongoing notifications.
+- Without Extended Control, firmware/API version, supported inputs, sound programs, scene counts, dB range and speaker pattern count remain unknown. No fallback profile invents these values.
+- The new read-only discovery paths have **not** yet been built or tested on Windows or physical alternative models. Existing RX-A3060 live evidence applies to the previous release.
+- Yamaha `desc.xml` and model-specific profile resolution remain future work; the RX-A3060's descriptor was observed to omit working speaker paths.
+
 ## Capability terminology
 
 The current shared models distinguish `Unknown`, `Advertised`, `ReadVerified`, `WriteVerified`, `KnownUnsupported`, and `TemporarilyUnavailable` capability status. Evidence sources include `DeviceReported`, `ReadProbe`, `VerifiedHardwareWrite`, `KnownProfile`, `BackupInspection`, and `Inferred`.
@@ -69,11 +79,13 @@ remain **not hardware verified** until separately checked.
 
 | Operation | Implementation | RX-A3060 live evidence for this C# code |
 | --- | --- | --- |
-| Extended `getStatus` sound/DSP fields | Read-only API | Not yet confirmed with this implementation |
-| Advertised sound program IDs and zone Scene counts | Extended `getFeatures` | RX-A3060 reported 27 Main sound programs and 12 Main scenes; 4 scenes in each secondary zone |
+| Extended `getStatus` sound/DSP fields | Read-only API | Confirmed by RX-A3060 console output: Main `straight`, `pure_direct=Off`, `enhancer=Off`, `dolby_surround` decoder; zone-specific partial/unknown fields |
+| Advertised sound program IDs and zone Scene counts | Extended `getFeatures` | Confirmed by RX-A3060 console output: 27 Main programs, 12 Main scenes; 4 scenes in each secondary zone |
 | `setSoundProgram` with native IDs and status readback | Opt-in, per-zone validated | Not yet exercised with this implementation |
 | YNCA MAIN Straight / Pure Direct / Enhancer writes | Opt-in, YNCA readback | Not yet exercised with this implementation |
 | Extended `recallScene` | Opt-in, accepts only advertised zones/scenes | Not yet exercised; receiver response cannot prove full scene execution |
+
+Live RX-A3060 YNCA readback also observed `MAIN:SOUNDPRG=The Bottom Line`, `MAIN:STRAIGHT=On`, `MAIN:PUREDIRMODE=Off`, and `MAIN:ENHANCER=Off` while power was `Standby`. Extended `program=straight` and YNCA `SOUNDPRG=The Bottom Line` must not be conflated: active playback mode and stored DSP program are distinct concepts. This new evidence predates the multi-protocol-discovery refactor, which still requires validation.
 
 Read-only discovery does not authorize write probing, and user-reported success
 for prior Power/Volume/Mute/Input control is not evidence for the new sound paths.

@@ -6,7 +6,7 @@ YamahaAvrNet is an independent C# library for controlling Yamaha AV receivers. I
 **Language baseline:** C# 7.3  
 **License:** MIT (see [LICENSE](LICENSE))
 
-**Current implementation status:** Phase 5.1 additionally exposes sound/DSP status, guarded native sound program selection and scene recall. The new C# sound/scene paths have not yet been confirmed at the receiver. Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP GETs were successfully observed on the RX-A3060. Phase 4.2 adds typed zone status and optional YNCA power, mute, dB volume and input writes, all guarded by explicit opt-in and readback. The user reports successful manual GUI control on RX-A3060; exact per-zone coverage was not recorded. Active speaker configuration, PEQ, writing other speaker channels and Pattern 2 remain unimplemented. The C# legacy XML PUT implementation also requires hardware verification. Historical RX-A3060 observations are documented separately from software implementation.
+**Current implementation status:** Multi-protocol read-only discovery now works without mandatory Extended Control. `InitializeAsync()` independently probes enabled Extended Control, legacy XML and YNCA; discovered protocol reachability and read evidence are exposed separately. A YNCA-only receiver can expose its observed model and successfully probed zone IDs, but does not gain unverified volume ranges, input lists or write rights. `desc.xml` parsing and broad model profiles are not implemented yet. Phase 5.1 additionally exposes sound/DSP status, guarded native sound program selection and scene recall. The RX-A3060 has now confirmed sound/DSP reads via both Extended Control and YNCA; sound/scene writes remain unverified. Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP GETs were successfully observed on the RX-A3060. Phase 4.2 adds typed zone status and optional YNCA power, mute, dB volume and input writes, all guarded by explicit opt-in and readback. The user reports successful manual GUI control on RX-A3060; exact per-zone coverage was not recorded. Active speaker configuration, PEQ, writing other speaker channels and Pattern 2 remain unimplemented. The C# legacy XML PUT implementation also requires hardware verification. Historical RX-A3060 observations are documented separately from software implementation.
 
 ## Solution and projects
 
@@ -54,7 +54,7 @@ The WPF application is a **manual** command and diagnostic interface, not an aut
 
 ## Read-only YNCA TCP example
 
-YNCA uses a single persistent TCP connection per receiver. The API below does not change AVR settings and works independently of the dispatcher or WPF GUI. The `InitializeAsync()` method remains Extended-Control-specific; connect YNCA explicitly through `Ynca.ConnectAsync()`.
+YNCA uses a single TCP connection per receiver. `InitializeAsync()` now tests enabled protocols independently with read-only commands. A discovery-only YNCA connection is released afterwards to avoid monopolizing the port. To receive unsolicited messages continuously, explicitly connect `Ynca.ConnectAsync()` after discovery. This works without Extended Control.
 
 ```csharp
 using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
@@ -74,6 +74,32 @@ using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
 ```
 
 The transport bounds request time, serializes GETs, handles split and combined TCP frames, interprets `@RESTRICTED`/`@UNDEFINED`, and resets the session after an ambiguous timeout. Push notifications can be indistinguishable from solicited replies: a matching observation is **not** a cryptographically or transactionally correlated acknowledgment. Read-only operations never infer write capabilities. A dropped connection is reported and a subsequent explicit GET reconnects; no background reconnect/keepalive is implemented yet. The YNCA GET functionality was confirmed against the RX-A3060 in an interactive console run; manual zone writes were subsequently reported working via the GUI, without per-zone evidence details.
+
+## Multi-protocol discovery without Extended Control
+
+```csharp
+using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
+{
+    Host = "192.168.1.50",
+    EnableExtendedControl = false,
+    EnableLegacyXml = false,
+    EnableYnca = true
+}))
+{
+    await receiver.InitializeAsync();
+    Console.WriteLine(receiver.Model ?? "Model unknown");
+    foreach (var probe in receiver.Protocols.Values)
+        Console.WriteLine(probe.Protocol + ": " + probe.Availability);
+    foreach (var zone in receiver.Zones)
+        Console.WriteLine("Observed YNCA zone: " + zone.NativeId);
+}
+```
+
+The YNCA-only mode supports read-only typed zone refreshes for **successfully observed**
+native zones. It does **not** claim universal zone support or authorize zone writes
+without Extended Control device-advertised ranges and IDs. Connection state
+`PartiallyConnected` is possible when one enabled protocol works but another fails.
+Availability means a particular endpoint/probe worked, not that all its commands work.
 
 ## Read-only speaker settings example
 
@@ -146,14 +172,14 @@ The library uses `Newtonsoft.Json` 13.0.4, which provides a .NET Framework-compa
 
 ## API and design principles
 
-- `YamahaAvrClient` is the application-facing entry point. Its lifecycle methods currently use read-only Extended Control when enabled. Speaker reads use a separate legacy XML provider; neither provider depends on the WPF GUI.
-- `YamahaAvrOptions` defines host, HTTP and YNCA ports, enabled protocols, and a request timeout. Constructing the client does not open a connection. `InitializeAsync` currently requires Extended Control. `receiver.Ynca.ConnectAsync()` works without Extended Control; explicit legacy XML speaker reads are also independent of initialization.
-- System features, zones, inputs, sound programs, scene counts, speaker-pattern counts, and numeric ranges are read from actual Extended Control responses. Native speaker channel IDs are discovered from aggregate legacy XML speaker reads; no universal fixed mapping is assumed.
+- `YamahaAvrClient` is the application-facing entry point. `InitializeAsync` uses safe, independent read-only probes for each enabled protocol. A failed protocol does not prevent another working protocol from being used. Speaker reads use a separate legacy XML provider; neither provider depends on the WPF GUI.
+- `YamahaAvrOptions` defines host, HTTP and YNCA ports, enabled protocols, and a request timeout. Constructing the client does not open a connection. `InitializeAsync` no longer requires Extended Control. `receiver.Protocols` exposes `Available`, `Unavailable`, `Disabled` or `NotChecked` per protocol; `Unavailable` is not permanent lack of support. `receiver.Ynca.ConnectAsync()` and explicit legacy XML reads still work independently.
+- System features, zones, inputs, sound programs, scene counts, speaker-pattern counts, and numeric ranges are read from actual Extended Control responses when available. Without Extended Control, model identity and recognized zone identifiers can come from successful YNCA queries; missing Extended-specific values stay unknown. Native speaker channel IDs are discovered from aggregate legacy XML speaker reads; no universal fixed mapping is assumed.
 - Capability status and evidence are tracked separately. An unknown capability is **not** treated as unsupported, and successful reads do not imply write permission.
 - Extended Control volume ranges retain the receiver-reported **dB** values independently of its numerical display scale. Speaker levels and distances use `decimal` and preserve native unit and exponent.
 - Addressable speaker channels, configured speakers, and channels currently carrying a signal are distinct concepts.
 - YNCA GET requests and unsolicited messages share one TCP connection; the WPF application does not contain protocol-specific networking logic. Disconnected sessions are re-established on an explicit connect or subsequent GET. Continuous background reconnect, write commands, serial transport, and keepalive remain future work.
-- Discovery remains read-only. Setting `YamahaAvrOptions.EnableVerifiedSpeakerWrites = true` is required for writes; the current implementation additionally requires `RX-A3060` firmware `2.86`, exactly two advertised patterns, active Pattern `1`, channel `Front_L`, a recognized native encoding and an allowed reference value. Level writes are restricted to `0.0` or `0.5 dB`; distance writes to `2.95` or `3.00 m`. Before/after aggregate reads verify the operation. No blind retries or automatic restoration are attempted; if a write times out, the receiver state is unknown and must be checked before proceeding.
+- Discovery remains read-only. YNCA probing sends `SYS:MODELNAME` and, only when Extended Control did not provide zones, known native zone `PWR` GETs. Legacy XML probing requests `Pattern_Sel` only. Probes never send writes or switch speaker patterns. `desc.xml` cannot be relied upon as a complete list of Yamaha controls and is not parsed by this release. Setting `YamahaAvrOptions.EnableVerifiedSpeakerWrites = true` is required for writes; the current implementation additionally requires `RX-A3060` firmware `2.86`, exactly two advertised patterns, active Pattern `1`, channel `Front_L`, a recognized native encoding and an allowed reference value. Level writes are restricted to `0.0` or `0.5 dB`; distance writes to `2.95` or `3.00 m`. Before/after aggregate reads verify the operation. No blind retries or automatic restoration are attempted; if a write times out, the receiver state is unknown and must be checked before proceeding.
 
 ## Documentation
 

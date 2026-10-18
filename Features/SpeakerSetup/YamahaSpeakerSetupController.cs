@@ -55,10 +55,24 @@ namespace YamahaAvrNet.Features.SpeakerSetup
             cancellationToken.ThrowIfCancellationRequested();
             if (_legacy != null)
             {
-                string xml = await _legacy.SendGetAsync(
-                    YamahaLegacyXmlCommandBuilder.ActivePattern(), cancellationToken)
-                    .ConfigureAwait(false);
-                return YamahaLegacyXmlResponseParser.ParseActivePattern(xml);
+                try
+                {
+                    string xml = await _legacy.SendGetAsync(
+                        YamahaLegacyXmlCommandBuilder.ActivePattern(), cancellationToken)
+                        .ConfigureAwait(false);
+                    int? active = YamahaLegacyXmlResponseParser.ParseActivePattern(xml);
+                    if (active.HasValue || _getExtendedActivePattern == null)
+                        return active;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception) when (_getExtendedActivePattern != null)
+                {
+                    // A failed legacy read does not invalidate a separate
+                    // Extended Control observation. Probe that below instead.
+                }
             }
             if (_getExtendedActivePattern != null)
                 return await _getExtendedActivePattern(cancellationToken).ConfigureAwait(false);
