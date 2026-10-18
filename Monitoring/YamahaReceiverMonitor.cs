@@ -114,13 +114,13 @@ namespace YamahaAvrNet.Monitoring
                             try
                             {
                                 var requestStartedUtc = DateTimeOffset.UtcNow;
-                                var observed = await _receiver.ZoneControl.RefreshAsync(zone.NativeId, ct)
+                                var zoneSnapshot = await _receiver.ZoneControl.RefreshAsync(zone.NativeId, ct)
                                     .ConfigureAwait(false);
                                 // A controller may return a cached snapshot when all
                                 // individual functions were rejected by the receiver.
-                                if (observed.ObservedUtc.HasValue &&
-                                    observed.ObservedUtc.Value >= requestStartedUtc &&
-                                    !observed.IsStale)
+                                if (zoneSnapshot.ObservedUtc.HasValue &&
+                                    zoneSnapshot.ObservedUtc.Value >= requestStartedUtc &&
+                                    !zoneSnapshot.IsStale)
                                     successes++;
                                 else
                                     errors.Add("YNCA " + zone.NativeId + ": no fresh value observed.");
@@ -147,14 +147,14 @@ namespace YamahaAvrNet.Monitoring
                         else _receiver.MarkMonitoringSuccess();
                     }
                     string detail = errors.Count == 0 ? null : string.Join(" | ", errors);
-                    var observed = DateTimeOffset.UtcNow;
+                    var polledAtUtc = DateTimeOffset.UtcNow;
                     lock (_sync)
                     {
-                        _lastPollUtc = observed;
+                        _lastPollUtc = polledAtUtc;
                         _lastError = detail;
-                        if (successes > 0) _lastSuccessfulPollUtc = observed;
+                        if (successes > 0) _lastSuccessfulPollUtc = polledAtUtc;
                     }
-                    RaisePollCompleted(new YamahaMonitorPollEventArgs(observed,
+                    RaisePollCompleted(new YamahaMonitorPollEventArgs(polledAtUtc,
                         successes > 0, successes, detail));
                     failures = successes > 0 ? 0 : Math.Min(failures + 1, 4);
                 }

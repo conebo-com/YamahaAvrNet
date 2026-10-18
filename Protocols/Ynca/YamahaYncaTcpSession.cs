@@ -92,7 +92,9 @@ namespace YamahaAvrNet.Protocols.Ynca
                         _last.Clear();
                     }
                     // Exactly one read loop is associated with each physical TCP connection.
-                    Task.Run(() => ReadLoopAsync(tcp, session));
+                    // It must run concurrently with ConnectAsync so that incoming replies
+                    // can be processed. ReadLoopAsync catches and handles its own faults.
+                    _ = Task.Run(() => ReadLoopAsync(tcp, session));
                     RaiseConnectionChanged(true, "YNCA TCP connection established.");
                 }
                 catch (Exception ex)
