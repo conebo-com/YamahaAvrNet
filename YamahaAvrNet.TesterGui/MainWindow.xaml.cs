@@ -47,7 +47,16 @@ namespace YamahaAvrNet.TesterGui
                 new TesterCommand("YNCA / Zones", "Set zone power (On/Standby)", "zone-set-power", false, true),
                 new TesterCommand("YNCA / Zones", "Set zone mute (On/Off)", "zone-set-mute", false, true),
                 new TesterCommand("YNCA / Zones", "Set zone volume (dB)", "zone-set-volume", false, true),
-                new TesterCommand("YNCA / Zones", "Set zone input (native ID)", "zone-set-input", false, true)
+                new TesterCommand("YNCA / Zones", "Set zone input (native ID)", "zone-set-input", false, true),
+                new TesterCommand("Sound / DSP", "Read YNCA Main DSP status", "sound-ynca"),
+                new TesterCommand("Sound / DSP", "Read zone sound status", "sound-status"),
+                new TesterCommand("Sound / DSP", "Show available sound programs", "sound-programs"),
+                new TesterCommand("Sound / DSP", "Set sound program (native ID)", "sound-set-program", false, true),
+                new TesterCommand("Sound / DSP", "Set Pure Direct (On/Off; MAIN)", "sound-pure-direct", false, true),
+                new TesterCommand("Sound / DSP", "Set Straight (On/Off; MAIN)", "sound-straight", false, true),
+                new TesterCommand("Sound / DSP", "Set Enhancer (On/Off; MAIN)", "sound-enhancer", false, true),
+                new TesterCommand("Scenes", "Show available scene numbers", "scene-list"),
+                new TesterCommand("Scenes", "Recall scene by number", "scene-recall", false, true)
             };
             LstCommands.ItemsSource = commands;
             ICollectionView view = CollectionViewSource.GetDefaultView(LstCommands.ItemsSource);
@@ -87,7 +96,8 @@ namespace YamahaAvrNet.TesterGui
                     EnableLegacyXml = true,
                     EnableYnca = true,
                     EnableVerifiedSpeakerWrites = ChkEnableVerifiedWrites.IsChecked == true,
-                    EnableYncaZoneWrites = ChkEnableYncaWrites.IsChecked == true
+                    EnableYncaZoneWrites = ChkEnableYncaWrites.IsChecked == true,
+                    EnableSoundSceneWrites = ChkEnableSoundWrites.IsChecked == true
                 });
                 TxtConnectionStatus.Text = "Connecting...";
                 await next.InitializeAsync();
@@ -211,7 +221,11 @@ namespace YamahaAvrNet.TesterGui
                 LblPattern.Visibility = pattern ? Visibility.Visible : Visibility.Collapsed;
             if (TxtPattern != null)
                 TxtPattern.Visibility = pattern ? Visibility.Visible : Visibility.Collapsed;
-            bool zoneCommand = command != null && command.Key.StartsWith("zone-", StringComparison.Ordinal);
+            bool soundCommand = command != null &&
+                (command.Key.StartsWith("sound-", StringComparison.Ordinal) ||
+                 command.Key.StartsWith("scene-", StringComparison.Ordinal));
+            bool zoneCommand = command != null &&
+                (command.Key.StartsWith("zone-", StringComparison.Ordinal) || soundCommand);
             LblZone.Visibility = zoneCommand ? Visibility.Visible : Visibility.Collapsed;
             TxtZone.Visibility = zoneCommand ? Visibility.Visible : Visibility.Collapsed;
             bool write = command != null && command.RequiresValue;
@@ -220,7 +234,12 @@ namespace YamahaAvrNet.TesterGui
             if (TxtWriteValue != null)
                 TxtWriteValue.Visibility = write ? Visibility.Visible : Visibility.Collapsed;
             if (TxtCommandHint != null)
-                TxtCommandHint.Text = zoneCommand
+                TxtCommandHint.Text = soundCommand
+                    ? (write ? "Sound and scene writes require the separate opt-in and confirmation. " +
+                        "Programs use Extended Control native IDs; On/Off switches use YNCA MAIN. " +
+                        "Scene actions are accepted by HTTP but cannot be fully verified by readback."
+                        : "Read sound status, supported sound programs and scene counts for the selected zone.")
+                    : zoneCommand
                     ? (write ? "YNCA zone writes change receiver settings. Require explicit opt-in, " +
                         "device-reported validation, confirmation and readback. " +
                         "Use On/Standby, On/Off, a dB value or a reported input ID as appropriate."
@@ -280,6 +299,12 @@ namespace YamahaAvrNet.TesterGui
                 if (command.Key.StartsWith("zone-set-", StringComparison.Ordinal))
                 {
                     await ExecuteZoneWriteAsync(command.Key);
+                    return;
+                }
+                if (command.Key.StartsWith("sound-", StringComparison.Ordinal) ||
+                    command.Key.StartsWith("scene-", StringComparison.Ordinal))
+                {
+                    await ExecuteSoundCommandAsync(command);
                     return;
                 }
                 if (command.RequiresValue)
@@ -407,6 +432,121 @@ namespace YamahaAvrNet.TesterGui
             }
             catch (Exception ex) { AppendResult("Operation failed: " + ex.Message); }
             finally { EndOperation(); }
+        }
+
+        private async Task ExecuteSoundCommandAsync(TesterCommand command)
+        {
+            if (_receiver.Sound == null)
+                throw new InvalidOperationException("Extended Control is unavailable.");
+            string zone = TxtZone.Text.Trim();
+            if (command.Key == "sound-ynca")
+            {
+                if (_receiver.Ynca == null)
+                    throw new InvalidOperationException("YNCA is disabled for this receiver.");
+                foreach (string field in new[] { "SOUNDPRG", "STRAIGHT", "PUREDIRMODE", "ENHANCER" })
+                    await DisplayYncaGetAsync("MAIN", field);
+                return;
+            }
+            if (command.Key == "sound-status")
+            {
+                AppendHttp("GET /YamahaExtendedControl/v1/" + zone + "/getStatus");
+                AppendResult(FormatSound(await _receiver.Sound.GetStatusAsync(zone)));
+                return;
+            }
+            if (command.Key == "sound-programs")
+            {
+                AppendResult("Advertised programs for " + zone + ": " +
+                    string.Join(", ", _receiver.Sound.GetAdvertisedSoundPrograms(zone)));
+                return;
+            }
+            if (command.Key == "scene-list")
+            {
+                AppendResult("Advertised scene count for " + zone + ": " +
+                    Show(_receiver.Sound.GetAdvertisedSceneCount(zone)));
+                return;
+            }
+            if (ChkEnableSoundWrites.IsChecked != true)
+            {
+                AppendResult("Sound/scene writes are disabled. Enable the checkbox and reconnect.");
+                return;
+            }
+            string value = TxtWriteValue.Text.Trim();
+            bool switchAction = command.Key == "sound-pure-direct" ||
+                command.Key == "sound-straight" || command.Key == "sound-enhancer";
+            bool enabled = false;
+            if (switchAction)
+            {
+                if (string.Equals(value, "On", StringComparison.OrdinalIgnoreCase)) enabled = true;
+                else if (!string.Equals(value, "Off", StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("Use On or Off for a DSP switch.");
+                if (!string.Equals(zone, "main", StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("This YNCA DSP switch is currently MAIN-only.");
+            }
+            int scene = 0;
+            if (command.Key == "scene-recall" &&
+                (!int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out scene) || scene < 1))
+                throw new ArgumentException("Enter a positive scene number.");
+            // Validate the selected ID / scene count before asking for confirmation.
+            if (command.Key == "sound-set-program" &&
+                !_receiver.Sound.GetAdvertisedSoundPrograms(zone).Any(x =>
+                    string.Equals(x, value, StringComparison.OrdinalIgnoreCase)))
+                throw new ArgumentException("Select an advertised native sound program ID.");
+            if (command.Key == "scene-recall")
+            {
+                int? count = _receiver.Sound.GetAdvertisedSceneCount(zone);
+                if (!count.HasValue || scene > count.Value)
+                    throw new ArgumentException("Scene number exceeds the advertised count.");
+            }
+            string question = "Execute " + command.Name + " on " + zone + " with value '" + value + "'?" +
+                "\nThis changes receiver settings and is not automatically restored.";
+            if (MessageBox.Show(this, question, "Confirm Yamaha sound/scene action",
+                MessageBoxButton.YesNo, MessageBoxImage.Warning,
+                MessageBoxResult.No) != MessageBoxResult.Yes)
+            {
+                AppendResult("Action canceled; nothing sent.");
+                return;
+            }
+            switch (command.Key)
+            {
+                case "sound-set-program":
+                    AppendHttp("GET /YamahaExtendedControl/v1/" + zone + "/setSoundProgram (validated ID)");
+                    await _receiver.Sound.SetSoundProgramAsync(zone, value);
+                    AppendResult("Sound program readback confirmed: " + value);
+                    break;
+                case "sound-pure-direct":
+                    await _receiver.Sound.SetPureDirectAsync(enabled);
+                    AppendResult("Pure Direct YNCA readback matched the requested value.");
+                    break;
+                case "sound-straight":
+                    await _receiver.Sound.SetStraightAsync(enabled);
+                    AppendResult("Straight YNCA readback matched the requested value.");
+                    break;
+                case "sound-enhancer":
+                    await _receiver.Sound.SetEnhancerAsync(enabled);
+                    AppendResult("Enhancer YNCA readback matched the requested value.");
+                    break;
+                case "scene-recall":
+                    AppendHttp("GET /YamahaExtendedControl/v1/" + zone + "/recallScene (validated number)");
+                    await _receiver.Sound.RecallSceneAsync(zone, scene);
+                    AppendResult("Scene recall accepted by Yamaha (response_code=0). " +
+                        "The resulting input/DSP configuration is NOT independently verified.");
+                    break;
+            }
+        }
+
+        private static string FormatSound(YamahaSoundStatus state)
+        {
+            return "Zone " + state.ZoneNativeId + " | program=" + Show(state.SoundProgramNativeId) +
+                " | pure direct=" + ShowBool(state.PureDirectEnabled) +
+                " | enhancer=" + ShowBool(state.EnhancerEnabled) +
+                " | direct=" + ShowBool(state.DirectEnabled) +
+                " | surround decoder=" + Show(state.SurroundDecoderNativeId) +
+                " | observed UTC=" + state.ObservedUtc.ToString("u", CultureInfo.InvariantCulture);
+        }
+
+        private static string ShowBool(bool? value)
+        {
+            return value.HasValue ? (value.Value ? "On" : "Off") : "unknown";
         }
 
         private async Task ExecuteZoneWriteAsync(string key)
@@ -598,6 +738,7 @@ namespace YamahaAvrNet.TesterGui
             TxtZone.IsEnabled = !_busy;
             ChkEnableVerifiedWrites.IsEnabled = !_busy && _receiver == null;
             ChkEnableYncaWrites.IsEnabled = !_busy && _receiver == null;
+            ChkEnableSoundWrites.IsEnabled = !_busy && _receiver == null;
         }
 
         private void AppendResult(string message)

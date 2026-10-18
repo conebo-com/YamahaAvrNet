@@ -2,7 +2,7 @@
 
 This document distinguishes **observed receiver behavior** from **features currently implemented by YamahaAvrNet**. Historical observations were made on a **Yamaha RX-A3060, firmware 2.86, Extended Control API 2.08**. They must not be generalized to other models or firmware versions.
 
-**Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker aggregate GETs are implemented and have now been exercised successfully on the user's RX-A3060 (firmware 2.86): both patterns returned 13 native level/distance channels. The Phase 3.2 C# implementation adds narrowly restricted opt-in PUT for Pattern 1 / `Front_L`; this new writer has not yet been exercised on the receiver. YNCA TCP GETs have been observed in an interactive C# RX-A3060 run. The Phase 4.2 optional YNCA zone writer has not been exercised on hardware.
+**Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker aggregate GETs are implemented and have now been exercised successfully on the user's RX-A3060 (firmware 2.86): both patterns returned 13 native level/distance channels. The Phase 3.2 C# implementation adds narrowly restricted opt-in PUT for Pattern 1 / `Front_L`; this new writer has not yet been exercised on the receiver. YNCA TCP GETs have been observed in an interactive C# RX-A3060 run. The user subsequently reported the Phase 4.2 GUI controls working on RX-A3060; exact tested zone/function combinations were not enumerated.
 
 ## Capability terminology
 
@@ -49,7 +49,7 @@ A rejected request is not proof that an entire feature is unsupported. For examp
 | Legacy XML speaker PUT | Yes, limited opt-in for RX-A3060 2.86 / Pattern 1 / Front_L only | Not yet using this C# writer (previous controlled hardware writes verified) |
 | Legacy XML speaker levels and distances (aggregate GET) | Yes | Yes: 13 channels for both Pattern 1 and 2 |
 | YNCA TCP GETs and unsolicited status notifications | Yes (Phase 4.1) | Yes: main-zone GET observations on RX-A3060 |
-| Typed YNCA zone PUT with readback | Yes, manual opt-in (Phase 4.2) | No, pending controlled hardware confirmation |
+| Typed YNCA zone PUT with readback | Yes, manual opt-in (Phase 4.2) | User-reported GUI success on RX-A3060; per-zone details unavailable |
 | YNCA keepalive and continuous background reconnect | No | No |
 
 See [Protocol reference](PROTOCOLS.md) and [Speaker setup](SPEAKER_SETUP.md) for request formats and channel semantics.
@@ -64,3 +64,16 @@ A subsequent explicit `MAIN:VOL` query returned `-36.5` again. These are
 **read observations**, not evidence that the new Phase 4.2 C# PUT path
 works or that any Zone 2/3/4 YNCA commands work. All YNCA zone writes
 remain **not hardware verified** until separately checked.
+
+### Phase 5.1 sound and scene evidence
+
+| Operation | Implementation | RX-A3060 live evidence for this C# code |
+| --- | --- | --- |
+| Extended `getStatus` sound/DSP fields | Read-only API | Not yet confirmed with this implementation |
+| Advertised sound program IDs and zone Scene counts | Extended `getFeatures` | RX-A3060 reported 27 Main sound programs and 12 Main scenes; 4 scenes in each secondary zone |
+| `setSoundProgram` with native IDs and status readback | Opt-in, per-zone validated | Not yet exercised with this implementation |
+| YNCA MAIN Straight / Pure Direct / Enhancer writes | Opt-in, YNCA readback | Not yet exercised with this implementation |
+| Extended `recallScene` | Opt-in, accepts only advertised zones/scenes | Not yet exercised; receiver response cannot prove full scene execution |
+
+Read-only discovery does not authorize write probing, and user-reported success
+for prior Power/Volume/Mute/Input control is not evidence for the new sound paths.

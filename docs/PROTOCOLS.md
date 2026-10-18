@@ -2,7 +2,7 @@
 
 This document records publicly useful protocol behavior and historical receiver observations, **not an implementation-completeness claim**. The reference device is a **Yamaha RX-A3060** running firmware **2.86** with Extended Control API **2.08**. Availability and limits can differ by model, firmware, and current receiver state.
 
-YamahaAvrNet is designed to use three protocol families together when available. The implementation includes three Extended Control GET endpoints, legacy XML speaker GETs and limited opt-in verified-scope PUTs, plus a shared YNCA TCP session with typed zone status and optional guarded zone writes. Unverified functions remain disabled.
+YamahaAvrNet is designed to use three protocol families together when available. The implementation includes Extended Control system discovery and the Phase 5.1 zone getStatus/sound/scene endpoints, legacy XML speaker GETs and limited opt-in verified-scope PUTs, plus a shared YNCA TCP session with typed zone status and optional guarded zone writes. Unverified functions remain disabled.
 
 ## 1. YNCA (TCP / optionally serial)
 
@@ -158,3 +158,27 @@ For native channel names, active-versus-addressable distinctions, and pattern-sp
 ## Restricted PUT implementation (Phase 3.2)
 
 The library can now issue the **previously hardware-verified** legacy XML `PUT` path for `Pattern_1/Lvl/Front_L` and `Pattern_1/Distance/Meter/Front_L`, but only with explicit write opt-in, RX-A3060 firmware 2.86 identity, active Pattern 1 and confirmed native units/exponents. Only the reference values 0.0/0.5 dB or 2.95/3.00 m are accepted. Whole-aggregate GET reads provide preflight and post-write verification. HTTP success and Yamaha `RC=0` are checked separately; no automatic retries are made. This C# path still requires a real-device run before claiming it was verified in the new implementation.
+
+## Sound programs and scene actions (Phase 5.1)
+
+For a device reporting Extended Control zone features, the following additional
+endpoints are used. Every HTTP response is validated for both HTTP success and
+Yamaha `response_code == 0`:
+
+```text
+GET /YamahaExtendedControl/v1/{zone}/getStatus
+GET /YamahaExtendedControl/v1/{zone}/setSoundProgram?program={advertised-native-id}
+GET /YamahaExtendedControl/v1/{zone}/recallScene?num={advertised-scene-number}
+```
+
+The latter two HTTP GETs **have side effects** and are not used during discovery.
+Native `sound_program_list` IDs are not interchangeable with `@MAIN:SOUNDPRG` display
+values. The YNCA `MAIN:STRAIGHT`, `MAIN:PUREDIRMODE` and `MAIN:ENHANCER` fields are
+handled through the existing shared YNCA session (On/Off only, with readback).
+Scene recall is a command action: Yamaha success confirms receipt/acceptance, not
+that every scene-dependent state was independently verified. Operations require an
+explicit opt-in and must never be automatically retried after an uncertain timeout.
+
+References: Yamaha Extended Control API Specification (zone getStatus,
+setSoundProgram, recallScene); Yamaha YNCA MAIN function definitions. Individual
+feature availability must still be determined from the receiver.

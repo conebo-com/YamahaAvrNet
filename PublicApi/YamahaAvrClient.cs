@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using YamahaAvrNet.Discovery;
 using YamahaAvrNet.Features.SpeakerSetup;
+using YamahaAvrNet.Features.Audio;
 using YamahaAvrNet.Features.Zones;
 using YamahaAvrNet.Models;
 using YamahaAvrNet.Protocols.ExtendedControl;
@@ -56,6 +57,9 @@ namespace YamahaAvrNet.PublicApi
             _zoneController = _yncaSession == null ? null : new YamahaZoneController(
                 _yncaSession, () => DeviceFeatures, () => _disposed, _options.EnableYncaZoneWrites);
             ZoneControl = _zoneController;
+            Sound = _extendedHttp == null ? null : new YamahaSoundController(
+                _extendedHttp, _yncaSession, () => DeviceFeatures,
+                () => _disposed, _options.EnableSoundSceneWrites);
             Speakers = new YamahaSpeakerSetupController(EnsureNotDisposed, _legacyXml,
                 GetReportedSpeakerPatternCount, GetExtendedActivePatternAsync,
                 RecordSpeakerRead, () => Model,
@@ -99,6 +103,8 @@ namespace YamahaAvrNet.PublicApi
         public IYamahaYnca Ynca { get; private set; }
         /// <summary>Typed zone controls using the same shared YNCA session.</summary>
         public IYamahaZones ZoneControl { get; private set; }
+        /// <summary>Sound, DSP and scene operations backed by advertised Extended Control features.</summary>
+        public IYamahaSound Sound { get; private set; }
 
         public YamahaExtendedDeviceInfo DeviceInfo
         {

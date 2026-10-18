@@ -35,6 +35,12 @@ namespace YamahaAvrNet.PublicApi
         /// </summary>
         public bool EnableYncaZoneWrites { get; set; }
 
+        /// <summary>
+        /// Explicit opt-in for manual sound and scene actions. Disabled by default;
+        /// discovery and read-only operations never invoke these actions.
+        /// </summary>
+        public bool EnableSoundSceneWrites { get; set; }
+
         internal YamahaAvrOptions CopyValidated()
         {
             if (string.IsNullOrWhiteSpace(Host))
@@ -63,7 +69,8 @@ namespace YamahaAvrNet.PublicApi
                 EnableLegacyXml = EnableLegacyXml,
                 RequestTimeout = RequestTimeout,
                 EnableVerifiedSpeakerWrites = EnableVerifiedSpeakerWrites,
-                EnableYncaZoneWrites = EnableYncaZoneWrites
+                EnableYncaZoneWrites = EnableYncaZoneWrites,
+                EnableSoundSceneWrites = EnableSoundSceneWrites
             };
         }
     }

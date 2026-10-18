@@ -13,13 +13,13 @@ using YamahaAvrNet.PublicApi;
 namespace YamahaAvrNet.Protocols.ExtendedControl
 {
     /// <summary>
-    /// One reusable, read-only HTTP transport for Yamaha Extended Control.
-    /// Requests are serialized and restricted to three constant GET endpoints.
+    /// Shared Extended Control HTTP transport for discovery and explicitly gated zone actions.
+    /// Each request is serialized; the action methods are never called during discovery.
     /// </summary>
     internal sealed class YamahaExtendedHttpClient : IYamahaExtendedControl, IDisposable
     {
         private const int MaximumResponseBytes = 2 * 1024 * 1024;
-        private const string ApiPrefix = "/YamahaExtendedControl/v1/system/";
+        private const string ApiPrefix = "/YamahaExtendedControl/v1/";
         private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
 
         private readonly HttpClient _http;
@@ -49,22 +49,46 @@ namespace YamahaAvrNet.Protocols.ExtendedControl
         public async Task<YamahaExtendedDeviceInfo> GetDeviceInfoAsync(
             CancellationToken cancellationToken = default(CancellationToken))
         {
-            string json = await GetJsonAsync("getDeviceInfo", cancellationToken).ConfigureAwait(false);
+            string json = await GetJsonAsync("system/getDeviceInfo", cancellationToken).ConfigureAwait(false);
             return YamahaExtendedResponseParser.ParseDeviceInfo(json);
         }
 
         public async Task<YamahaExtendedFeatures> GetFeaturesAsync(
             CancellationToken cancellationToken = default(CancellationToken))
         {
-            string json = await GetJsonAsync("getFeatures", cancellationToken).ConfigureAwait(false);
+            string json = await GetJsonAsync("system/getFeatures", cancellationToken).ConfigureAwait(false);
             return YamahaExtendedResponseParser.ParseFeatures(json);
         }
 
         public async Task<YamahaExtendedFunctionStatus> GetFuncStatusAsync(
             CancellationToken cancellationToken = default(CancellationToken))
         {
-            string json = await GetJsonAsync("getFuncStatus", cancellationToken).ConfigureAwait(false);
+            string json = await GetJsonAsync("system/getFuncStatus", cancellationToken).ConfigureAwait(false);
             return YamahaExtendedResponseParser.ParseFuncStatus(json);
+        }
+
+        internal async Task<YamahaSoundStatus> GetZoneSoundStatusAsync(string zone,
+            CancellationToken cancellationToken)
+        {
+            string json = await GetJsonAsync(zone + "/getStatus", cancellationToken).ConfigureAwait(false);
+            return YamahaExtendedResponseParser.ParseZoneSoundStatus(json, zone);
+        }
+
+        internal async Task SetSoundProgramAsync(string zone, string nativeProgram,
+            CancellationToken cancellationToken)
+        {
+            string operation = zone + "/setSoundProgram?program=" + Uri.EscapeDataString(nativeProgram);
+            string json = await GetJsonAsync(operation, cancellationToken).ConfigureAwait(false);
+            YamahaExtendedResponseParser.ValidateCommandResponse(json, "setSoundProgram");
+        }
+
+        internal async Task RecallSceneAsync(string zone, int number,
+            CancellationToken cancellationToken)
+        {
+            string operation = zone + "/recallScene?num=" +
+                number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            string json = await GetJsonAsync(operation, cancellationToken).ConfigureAwait(false);
+            YamahaExtendedResponseParser.ValidateCommandResponse(json, "recallScene");
         }
 
         private async Task<string> GetJsonAsync(string operation, CancellationToken ct)

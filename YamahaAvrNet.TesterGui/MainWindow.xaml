@@ -89,6 +89,8 @@
                               Content="Enable limited RX-A3060 speaker writes (reconnect required)"/>
                     <CheckBox x:Name="ChkEnableYncaWrites" Margin="0,5,0,0"
                               Content="Enable YNCA zone writes (reconnect required)"/>
+                    <CheckBox x:Name="ChkEnableSoundWrites" Margin="0,5,0,0"
+                              Content="Enable sound / scene writes (reconnect required)"/>
                 </StackPanel>
                 <CheckBox Grid.Row="3" x:Name="ChkClearBeforeOperation" Margin="0,8,0,0"
                           Content="Clear outputs before each operation"/>

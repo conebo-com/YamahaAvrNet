@@ -6,7 +6,7 @@ YamahaAvrNet is an independent C# library for controlling Yamaha AV receivers. I
 **Language baseline:** C# 7.3  
 **License:** MIT (see [LICENSE](LICENSE))
 
-**Current implementation status:** Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP GETs were successfully observed on the RX-A3060. Phase 4.2 adds typed zone status and optional YNCA power, mute, dB volume and input writes, all guarded by explicit opt-in and readback. These new YNCA writes have not yet been hardware-verified. Active speaker configuration, PEQ, writing other speaker channels and Pattern 2 remain unimplemented. The C# legacy XML PUT implementation also requires hardware verification. Historical RX-A3060 observations are documented separately from software implementation.
+**Current implementation status:** Phase 5.1 additionally exposes sound/DSP status, guarded native sound program selection and scene recall. The new C# sound/scene paths have not yet been confirmed at the receiver. Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP GETs were successfully observed on the RX-A3060. Phase 4.2 adds typed zone status and optional YNCA power, mute, dB volume and input writes, all guarded by explicit opt-in and readback. The user reports successful manual GUI control on RX-A3060; exact per-zone coverage was not recorded. Active speaker configuration, PEQ, writing other speaker channels and Pattern 2 remain unimplemented. The C# legacy XML PUT implementation also requires hardware verification. Historical RX-A3060 observations are documented separately from software implementation.
 
 ## Solution and projects
 
@@ -73,7 +73,7 @@ using (var receiver = new YamahaAvrClient(new YamahaAvrOptions
 }
 ```
 
-The transport bounds request time, serializes GETs, handles split and combined TCP frames, interprets `@RESTRICTED`/`@UNDEFINED`, and resets the session after an ambiguous timeout. Push notifications can be indistinguishable from solicited replies: a matching observation is **not** a cryptographically or transactionally correlated acknowledgment. Read-only operations never infer write capabilities. A dropped connection is reported and a subsequent explicit GET reconnects; no background reconnect/keepalive is implemented yet. The YNCA GET functionality was confirmed against the RX-A3060 in an interactive console run; optional zone writes remain unverified.
+The transport bounds request time, serializes GETs, handles split and combined TCP frames, interprets `@RESTRICTED`/`@UNDEFINED`, and resets the session after an ambiguous timeout. Push notifications can be indistinguishable from solicited replies: a matching observation is **not** a cryptographically or transactionally correlated acknowledgment. Read-only operations never infer write capabilities. A dropped connection is reported and a subsequent explicit GET reconnects; no background reconnect/keepalive is implemented yet. The YNCA GET functionality was confirmed against the RX-A3060 in an interactive console run; manual zone writes were subsequently reported working via the GUI, without per-zone evidence details.
 
 ## Read-only speaker settings example
 
@@ -200,5 +200,32 @@ After any write, the library issues a GET for that same YNCA field and checks
 the observed value; it never retries a PUT automatically. YNCA has no request
 IDs, so even a matching observation is **not an absolute guarantee** that a
 spontaneous status message was not received instead of a response. This
-new write path has **not yet been confirmed on hardware**. Please verify
-receiver behavior before using it for routine control.
+zone writes have been **reported working through the GUI on an RX-A3060**.
+This is not a model-wide or per-zone compatibility claim.
+
+## Sound programs, DSP and scenes (Phase 5.1)
+
+`receiver.Sound` adds a typed API for receiver-advertised Yamaha sound and scene features.
+It is available when Extended Control is enabled and discovery has populated `DeviceFeatures`.
+
+- `GetStatusAsync(zone)` reads `/v1/{zone}/getStatus` and returns the advertised native sound
+  program ID and available Direct/Pure Direct/Enhancer/decoder fields (unknown remains `null`).
+- `GetAdvertisedSoundPrograms(zone)` and `GetAdvertisedSceneCount(zone)` return only the
+  features reported for that zone, without inventing static presets.
+- `SetSoundProgramAsync(zone, nativeId)` uses the **Extended Control native ID** obtained
+  from `getFeatures`, sends `/setSoundProgram` and checks a subsequent `/getStatus` readback.
+  Do not substitute a YNCA `SOUNDPRG` display value for the Extended ID.
+- `SetStraightAsync`, `SetPureDirectAsync` and `SetEnhancerAsync` currently target YNCA
+  `MAIN` only and use the one shared TCP session plus observed readback. Unsupported or
+  temporarily unavailable functions can still be rejected by the receiver.
+- `RecallSceneAsync(zone, number)` sends `/recallScene` only after validating the zone's
+  advertised `scene` function and scene count. It checks HTTP and Yamaha's
+  `response_code`, **not** the final multi-setting scene state. This is an action, not a
+  regular readback-verifiable field. The RX-A3060 advertised 12 Main Scenes and 4
+  Scenes in each additional zone; this is not a universal constant.
+
+All Phase 5.1 writes require `EnableSoundSceneWrites = true`; the option is false by
+ default. The WPF tester has a separate opt-in checkbox and requires confirmation
+for each sound/scene change. The interactive console sample remains read-only and
+can display the sound status, available sound IDs and scene count. The new Phase 5.1
+C# write methods have **not** yet been live-validated on the receiver.

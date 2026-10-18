@@ -73,6 +73,28 @@ namespace YamahaAvrNet.Sample
                         ", sound programs=" + zone.SoundPrograms.Count +
                         ", scenes=" + Show(zone.SceneCount));
 
+                if (Confirm("Read sound/DSP status and advertised scenes? [y/N]: "))
+                {
+                    foreach (var zone in features.Zones)
+                    {
+                        try
+                        {
+                            YamahaSoundStatus sound = await receiver.Sound.GetStatusAsync(zone.NativeId);
+                            Console.WriteLine("Zone " + zone.NativeId + ": program=" + Show(sound.SoundProgramNativeId) +
+                                ", pure direct=" + ShowBool(sound.PureDirectEnabled) +
+                                ", enhancer=" + ShowBool(sound.EnhancerEnabled) +
+                                ", decoder=" + Show(sound.SurroundDecoderNativeId));
+                            Console.WriteLine("  Available programs: " + string.Join(", ",
+                                receiver.Sound.GetAdvertisedSoundPrograms(zone.NativeId)));
+                            Console.WriteLine("  Advertised scenes: " + Show(receiver.Sound.GetAdvertisedSceneCount(zone.NativeId)));
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("  Zone " + zone.NativeId + " sound read unavailable: " + ex.Message);
+                        }
+                    }
+                }
+
                 if (!Confirm("Read legacy XML speaker settings? [y/N]: "))
                 {
                     await ReadYncaAsync(receiver);
@@ -155,6 +177,12 @@ namespace YamahaAvrNet.Sample
                             Console.WriteLine("Zone " + feature.NativeId + " unavailable: " + ex.Message);
                         }
                     }
+                }
+                Console.WriteLine();
+                if (Confirm("Read Main Zone YNCA sound/DSP values? [y/N]: "))
+                {
+                    foreach (string field in new[] { "SOUNDPRG", "STRAIGHT", "PUREDIRMODE", "ENHANCER" })
+                        await ShowYncaAsync(receiver, "MAIN", field);
                 }
                 Console.WriteLine();
                 Console.WriteLine("Optional YNCA GET: enter SUBUNIT:FUNCTION (e.g. MAIN:VOL).");
@@ -264,6 +292,11 @@ namespace YamahaAvrNet.Sample
                     return port;
                 Console.WriteLine("Enter an HTTP port from 1 to 65535.");
             }
+        }
+
+        private static string ShowBool(bool? value)
+        {
+            return value.HasValue ? (value.Value ? "On" : "Off") : "unknown";
         }
 
         private static string Show(string value)

@@ -102,6 +102,22 @@ namespace YamahaAvrNet.Protocols.ExtendedControl
                 DateTimeOffset.UtcNow);
         }
 
+        internal static YamahaSoundStatus ParseZoneSoundStatus(string json, string zoneNativeId)
+        {
+            JObject root = ReadRoot(json, "getStatus");
+            return new YamahaSoundStatus(zoneNativeId,
+                GetString(root, "sound_program"),
+                GetBoolean(root, "pure_direct"),
+                GetBoolean(root, "enhancer"),
+                GetBoolean(root, "direct"),
+                GetString(root, "surr_decoder_type"), DateTimeOffset.UtcNow);
+        }
+
+        internal static void ValidateCommandResponse(string json, string endpoint)
+        {
+            ReadRoot(json, endpoint);
+        }
+
         private static JObject ReadRoot(string json, string endpoint)
         {
             if (string.IsNullOrWhiteSpace(json))
