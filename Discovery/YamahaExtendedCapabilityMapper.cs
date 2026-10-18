@@ -24,14 +24,30 @@ namespace YamahaAvrNet.Discovery
                     AddAdvertised(values, "zone." + zone.NativeId + "." + function, device);
 
                 if (zone.Inputs.Count > 0)
+                {
+                    AddAdvertised(values, "zone." + zone.NativeId + ".input", device);
                     AddReadVerified(values, "zone." + zone.NativeId + ".inputs", device,
                         features.ObservedUtc);
+                }
                 if (zone.SoundPrograms.Count > 0)
+                {
+                    AddAdvertised(values, "zone." + zone.NativeId + ".sound_program", device);
                     AddReadVerified(values, "zone." + zone.NativeId + ".sound_programs", device,
                         features.ObservedUtc);
+                }
                 if (zone.SceneCount.HasValue)
+                {
+                    if (zone.SceneCount.Value > 0)
+                        AddAdvertised(values, "zone." + zone.NativeId + ".scene", device);
                     AddReadVerified(values, "zone." + zone.NativeId + ".scene_count", device,
                         features.ObservedUtc);
+                }
+                foreach (var range in zone.Ranges)
+                    AddReadVerified(values, "zone." + zone.NativeId + ".range." + range.Key,
+                        device, features.ObservedUtc);
+                foreach (var options in zone.OptionLists)
+                    AddReadVerified(values, "zone." + zone.NativeId + ".options." + options.Key,
+                        device, features.ObservedUtc);
                 YamahaExtendedNumericRange volumeRange;
                 if (zone.Ranges.TryGetValue("actual_volume_db", out volumeRange) &&
                     volumeRange.Minimum.HasValue && volumeRange.Maximum.HasValue)

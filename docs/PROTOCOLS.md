@@ -58,7 +58,7 @@ The `setSpeakerPattern?num=1|2` function is documented and advertised by the ref
 ### Implemented Extended Control behavior
 
 - Uses an explicitly configured receiver host and HTTP port (`80` by default); there is no network scan.
-- Sends only the three fixed GET endpoints above. No Extended Control write method is exposed.
+- Discovers via the three fixed system GET endpoints above. Explicitly opted-in sound-program and scene operations additionally use the documented zone endpoints; no write actions run during discovery.
 - Reuses one `HttpClient` per receiver object and serializes requests, including direct `ExtendedControl` calls.
 - Distinguishes HTTP status failures from Yamaha JSON `response_code` errors (`0` means success).
 - Parses JSON using `Newtonsoft.Json`; unknown or missing optional fields remain unknown without rejecting an otherwise valid response.
@@ -192,3 +192,24 @@ explicit opt-in and must never be automatically retried after an uncertain timeo
 References: Yamaha Extended Control API Specification (zone getStatus,
 setSoundProgram, recallScene); Yamaha YNCA MAIN function definitions. Individual
 feature availability must still be determined from the receiver.
+
+## Optional legacy descriptor lookup (Phase 5.3)
+
+The library now performs an optional, read-only HTTP GET of
+`/YamahaRemoteControl/desc.xml`, followed by `/YamahaRemoteControl/UnitDesc.xml`
+if the first is not available or valid. This is separate from `POST /ctrl`:
+a descriptor failure never negates a successful XML control probe.
+
+The parser requires a recognizable Yamaha XML root, refuses DTD and external
+entities, restricts input size to 1 MiB, and extracts only explicit command
+identifiers from `Cmd`/`Command` elements. Its output is diagnostic metadata,
+**not a complete command enumeration and not evidence of GET/PUT support**.
+The RX-A3060's earlier working `Speaker_Preout` paths were missing from its
+description. No XML commands are synthesized from descriptor content.
+
+The Extended Control feature parser remains the authoritative source of
+reported zone functions, inputs, sound programs, Scenes, native ranges and
+option lists. Phase 5.3 exposes descriptive per-protocol function routes;
+these are not directly invocable operations. YNCA-only models can produce
+read-verified `PWR` routes for zones positively observed by the bounded
+read-only probe. No write probes or automatic changes were added.

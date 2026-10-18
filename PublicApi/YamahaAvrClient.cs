@@ -26,6 +26,7 @@ namespace YamahaAvrNet.PublicApi
         private readonly YamahaAvrOptions _options;
         private readonly YamahaExtendedHttpClient _extendedHttp;
         private readonly YamahaLegacyXmlHttpClient _legacyXml;
+        private readonly YamahaLegacyDescriptorProbe _descriptorProbe;
         private readonly YamahaYncaTcpSession _yncaSession;
         private readonly YamahaZoneController _zoneController;
         private readonly SemaphoreSlim _lifecycleGate = new SemaphoreSlim(1, 1);
@@ -36,6 +37,9 @@ namespace YamahaAvrNet.PublicApi
         private IReadOnlyList<YamahaZoneInfo> _zones = EmptyZones;
         private string _yncaModel;
         private int? _legacyActivePattern;
+        private YamahaLegacyDescriptor _legacyDescriptor;
+        private IReadOnlyList<YamahaFunctionRoute> _functionRoutes =
+            Array.AsReadOnly(new YamahaFunctionRoute[0]);
         private readonly Dictionary<string, YamahaProtocolProbe> _protocols =
             new Dictionary<string, YamahaProtocolProbe>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTimeOffset> _yncaVerifiedReads =
@@ -58,6 +62,8 @@ namespace YamahaAvrNet.PublicApi
                 ? new YamahaExtendedHttpClient(_options) : null;
             _legacyXml = _options.EnableLegacyXml
                 ? new YamahaLegacyXmlHttpClient(_options) : null;
+            _descriptorProbe = _options.EnableLegacyXml
+                ? new YamahaLegacyDescriptorProbe(_options) : null;
             _yncaSession = _options.EnableYnca
                 ? new YamahaYncaTcpSession(_options.Host, _options.YncaPort, _options.RequestTimeout) : null;
             Ynca = _yncaSession == null ? null : new YamahaYncaController(_yncaSession);
@@ -118,6 +124,24 @@ namespace YamahaAvrNet.PublicApi
         public IReadOnlyList<YamahaZoneInfo> Zones
         {
             get { EnsureNotDisposed(); lock (_stateSync) return _zones; }
+        }
+
+        /// <summary>
+        /// Optional, incomplete legacy XML device description; null when unavailable.
+        /// Listed entries are never treated as proof of writable commands.
+        /// </summary>
+        public YamahaLegacyDescriptor LegacyDescriptor
+        {
+            get { EnsureNotDisposed(); lock (_stateSync) return _legacyDescriptor; }
+        }
+
+        /// <summary>
+        /// Receiver-advertised native function identifiers and YNCA read observations,
+        /// grouped by protocol. Routes are descriptive, not executable commands.
+        /// </summary>
+        public IReadOnlyList<YamahaFunctionRoute> FunctionRoutes
+        {
+            get { EnsureNotDisposed(); lock (_stateSync) return _functionRoutes; }
         }
 
         public IReadOnlyList<YamahaCapability> Capabilities
@@ -273,6 +297,8 @@ namespace YamahaAvrNet.PublicApi
                 _functionStatus = null;
                 _yncaModel = null;
                 _legacyActivePattern = null;
+                _legacyDescriptor = null;
+                _functionRoutes = Array.AsReadOnly(new YamahaFunctionRoute[0]);
                 _lastUpdatedUtc = null;
                 _zones = EmptyZones;
                 _speakerVerifiedReads.Clear();
@@ -358,6 +384,22 @@ namespace YamahaAvrNet.PublicApi
                 }
             }
 
+            // Optional description is useful for diagnostics and older models,
+            // but it is incomplete and independent from the working ctrl endpoint.
+            if (_descriptorProbe != null)
+            {
+                try
+                {
+                    var descriptor = await _descriptorProbe.ReadAsync(ct).ConfigureAwait(false);
+                    lock (_stateSync) _legacyDescriptor = descriptor;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (Exception)
+                {
+                    // Not a protocol failure: desc.xml is optional and often incomplete.
+                }
+            }
+
             if (_yncaSession != null)
             {
                 bool originallyConnected = _yncaSession.IsConnected;
@@ -395,34 +437,46 @@ namespace YamahaAvrNet.PublicApi
                     {
                         note += " SYS:MODELNAME unavailable: " + ex.Message;
                     }
-                    // If Extended Control cannot enumerate zones, attempt a safe,
-                    // bounded read of the known native YNCA subunits. Never invent zones.
-                    if (_features == null)
+                    // Observe native zone power on read-only YNCA. When Extended
+                    // Control listed zones, only probe those with known native
+                    // YNCA subunit names. Without it, use the bounded candidates.
+                    // A failed PWR request never removes a reported zone.
+                    var candidates = new List<string>();
+                    if (_features != null)
                     {
-                        var found = new List<YamahaZoneInfo>();
-                        foreach (string zone in new[] { "MAIN", "ZONE2", "ZONE3", "ZONE4" })
+                        foreach (var zone in _features.Zones)
                         {
-                            ct.ThrowIfCancellationRequested();
-                            try
-                            {
-                                var power = await _yncaSession.GetAsync(zone, "PWR", ct)
-                                    .ConfigureAwait(false);
-                                verifiedYnca = true;
-                                found.Add(new YamahaZoneInfo(zone.ToLowerInvariant(), zone.ToLowerInvariant()));
-                                lock (_stateSync)
-                                    _yncaVerifiedReads["ynca." + zone.ToLowerInvariant() + ".pwr"] = power.ReceivedUtc;
-                            }
-                            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-                            catch (YamahaFeatureNotSupportedException) { verifiedYnca = true; }
-                            catch (YamahaFeatureTemporarilyUnavailableException) { verifiedYnca = true; }
-                            catch (Exception)
-                            {
-                                // No answer is not a negative capability assertion.
-                                // An unsupported PWR query does not prove absent zone.
-                            }
+                            string id = zone.NativeId.ToUpperInvariant();
+                            if (id == "MAIN" || id == "ZONE2" ||
+                                id == "ZONE3" || id == "ZONE4")
+                                candidates.Add(id);
                         }
-                        lock (_stateSync) _zones = found.AsReadOnly();
                     }
+                    else candidates.AddRange(new[] { "MAIN", "ZONE2", "ZONE3", "ZONE4" });
+                    var found = new List<YamahaZoneInfo>();
+                    foreach (string zone in candidates)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        try
+                        {
+                            var power = await _yncaSession.GetAsync(zone, "PWR", ct)
+                                .ConfigureAwait(false);
+                            verifiedYnca = true;
+                            if (_features == null)
+                                found.Add(new YamahaZoneInfo(zone.ToLowerInvariant(), zone.ToLowerInvariant()));
+                            lock (_stateSync)
+                                _yncaVerifiedReads["ynca." + zone.ToLowerInvariant() + ".pwr"] = power.ReceivedUtc;
+                        }
+                        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                        catch (YamahaFeatureNotSupportedException) { verifiedYnca = true; }
+                        catch (YamahaFeatureTemporarilyUnavailableException) { verifiedYnca = true; }
+                        catch (Exception)
+                        {
+                            // Not receiving PWR does not prove the zone absent.
+                        }
+                    }
+                    if (_features == null)
+                        lock (_stateSync) _zones = found.AsReadOnly();
                     lock (_stateSync) SetProbe("YNCA", verifiedYnca ?
                         YamahaProtocolAvailability.Available : YamahaProtocolAvailability.Unavailable, note);
                     if (verifiedYnca) success++;
@@ -548,6 +602,14 @@ namespace YamahaAvrNet.PublicApi
                     model: device == null ? _yncaModel : device.ModelName,
                     firmware: device == null ? null : device.SystemVersion,
                     lastVerifiedUtc: pair.Value));
+            if (_legacyDescriptor != null)
+                known.Add(new YamahaCapability("legacy.descriptor",
+                    YamahaCapabilityStatus.ReadVerified, YamahaEvidenceSource.ReadProbe,
+                    canRead: true, protocol: "LegacyXml",
+                    model: device == null ? _yncaModel : device.ModelName,
+                    firmware: device == null ? null : device.SystemVersion,
+                    lastVerifiedUtc: _legacyDescriptor.ObservedUtc));
+            _functionRoutes = YamahaFunctionRouteMapper.Build(features, _yncaVerifiedReads);
             return new YamahaDeviceCapabilities(known);
         }
 
@@ -597,6 +659,8 @@ namespace YamahaAvrNet.PublicApi
                 _extendedHttp.Dispose();
             if (_legacyXml != null)
                 _legacyXml.Dispose();
+            if (_descriptorProbe != null)
+                _descriptorProbe.Dispose();
             if (_zoneController != null)
                 _zoneController.Dispose();
             if (_yncaSession != null)

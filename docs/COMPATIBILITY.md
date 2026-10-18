@@ -4,15 +4,16 @@ This document distinguishes **observed receiver behavior** from **features curre
 
 **Implementation status:** The C# library now implements the read-only Extended Control `getDeviceInfo`, `getFeatures`, and `getFuncStatus` operations. Legacy XML speaker aggregate GETs are implemented and have now been exercised successfully on the user's RX-A3060 (firmware 2.86): both patterns returned 13 native level/distance channels. The Phase 3.2 C# implementation adds narrowly restricted opt-in PUT for Pattern 1 / `Front_L`; this new writer has not yet been exercised on the receiver. YNCA TCP GETs have been observed in an interactive C# RX-A3060 run. The user subsequently reported the Phase 4.2 GUI controls working on RX-A3060; exact tested zone/function combinations were not enumerated.
 
-## Multi-protocol discovery (implementation, not yet hardware-validated)
+## Multi-protocol discovery (RX-A3060 hardware validated for Phase 5.2)
 
 - Initialization no longer requires Extended Control: each enabled endpoint is probed with read-only commands independently. At least one usable endpoint is sufficient.
 - `receiver.Protocols` reports availability for `ExtendedControl`, `LegacyXml`, and `YNCA`, with details. `Unavailable` is **not** a claim of permanent incompatibility.
 - YNCA-only discovery can identify `SYS:MODELNAME` and discover a zone **only after** its `PWR` query returns a value. The four candidate subunit names are protocol knowledge, not assumed existing zones.
 - A temporary YNCA discovery connection is closed after probing; explicit `Ynca.ConnectAsync()` remains necessary for ongoing notifications.
 - Without Extended Control, firmware/API version, supported inputs, sound programs, scene counts, dB range and speaker pattern count remain unknown. No fallback profile invents these values.
-- The new read-only discovery paths have **not** yet been built or tested on Windows or physical alternative models. Existing RX-A3060 live evidence applies to the previous release.
-- Yamaha `desc.xml` and model-specific profile resolution remain future work; the RX-A3060's descriptor was observed to omit working speaker paths.
+- Phase 5.2 was exercised on the RX-A3060: ExtendedControl, LegacyXml and YNCA were all reported `Available`; four zones and two patterns were detected. This validates the reference model, **not** other models.
+- Phase 5.3 adds optional bounded `desc.xml` / `UnitDesc.xml` GET metadata and descriptive native function routes. This new code has **not** yet been executed on the receiver. Its absence or incompleteness does not establish a missing function.
+- Model-specific profile resolution remains future work; the RX-A3060's descriptor was observed to omit working speaker paths.
 
 ## Capability terminology
 

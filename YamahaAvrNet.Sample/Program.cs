@@ -68,6 +68,21 @@ namespace YamahaAvrNet.Sample
                 foreach (var protocol in receiver.Protocols.Values.OrderBy(x => x.Protocol))
                     Console.WriteLine("  " + protocol.Protocol + ": " + protocol.Availability +
                         (string.IsNullOrEmpty(protocol.Detail) ? "" : " - " + protocol.Detail));
+                Console.WriteLine("Function routes: " + receiver.FunctionRoutes.Count +
+                    " (advertised or observed; not proof of write support)");
+                var description = receiver.LegacyDescriptor;
+                Console.WriteLine("Legacy XML description: " +
+                    (description == null ? "unavailable / unverified" :
+                        description.ResourcePath + " (" + description.CommandElementCount +
+                        " command elements; incomplete metadata)"));
+                if (Confirm("Show discovered function routes? [y/N]: "))
+                {
+                    foreach (var route in receiver.FunctionRoutes.OrderBy(r => r.FunctionId)
+                        .ThenBy(r => r.Protocol))
+                        Console.WriteLine("  " + route.FunctionId + " | " + route.Protocol +
+                            " | " + route.NativeIdentifier + " | " + route.Status);
+                    Console.WriteLine("Routes are discovery metadata, not executable commands.");
+                }
                 Console.WriteLine("Reported zones: " +
                     Show(features == null ? (int?)null : features.ReportedZoneCount));
                 Console.WriteLine("Observed YNCA/Extended zones: " +

@@ -6,7 +6,7 @@ YamahaAvrNet is an independent C# library for controlling Yamaha AV receivers. I
 **Language baseline:** C# 7.3  
 **License:** MIT (see [LICENSE](LICENSE))
 
-**Current implementation status:** Multi-protocol read-only discovery now works without mandatory Extended Control. `InitializeAsync()` independently probes enabled Extended Control, legacy XML and YNCA; discovered protocol reachability and read evidence are exposed separately. A YNCA-only receiver can expose its observed model and successfully probed zone IDs, but does not gain unverified volume ranges, input lists or write rights. `desc.xml` parsing and broad model profiles are not implemented yet. Phase 5.1 additionally exposes sound/DSP status, guarded native sound program selection and scene recall. The RX-A3060 has now confirmed sound/DSP reads via both Extended Control and YNCA; sound/scene writes remain unverified. Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP GETs were successfully observed on the RX-A3060. Phase 4.2 adds typed zone status and optional YNCA power, mute, dB volume and input writes, all guarded by explicit opt-in and readback. The user reports successful manual GUI control on RX-A3060; exact per-zone coverage was not recorded. Active speaker configuration, PEQ, writing other speaker channels and Pattern 2 remain unimplemented. The C# legacy XML PUT implementation also requires hardware verification. Historical RX-A3060 observations are documented separately from software implementation.
+**Current implementation status:** Multi-protocol read-only discovery now works without mandatory Extended Control. `InitializeAsync()` independently probes enabled Extended Control, legacy XML and YNCA; discovered protocol reachability and read evidence are exposed separately. A YNCA-only receiver can expose its observed model and successfully probed zone IDs, but does not gain unverified volume ranges, input lists or write rights. `desc.xml` / `UnitDesc.xml` are now optionally read as incomplete discovery metadata; broad model profiles are not implemented yet. Phase 5.1 additionally exposes sound/DSP status, guarded native sound program selection and scene recall. The RX-A3060 has now confirmed sound/DSP reads via both Extended Control and YNCA; sound/scene writes remain unverified. Yamaha Extended Control discovery (`getDeviceInfo`, `getFeatures`, `getFuncStatus`) and legacy Yamaha HTTP/XML speaker reads are implemented. The RX-A3060's confirmed aggregate GET paths are used for active speaker pattern, level and distance queries. Both speaker patterns can be read by their explicit number; a bulk pattern enumeration uses the count reported by Extended Control. **Phase 3.2 adds a strictly limited, opt-in speaker PUT path** for the historically verified RX-A3060 firmware 2.86 / active Pattern 1 / `Front_L` level and distance values. YNCA TCP GETs were successfully observed on the RX-A3060. Phase 4.2 adds typed zone status and optional YNCA power, mute, dB volume and input writes, all guarded by explicit opt-in and readback. The user reports successful manual GUI control on RX-A3060; exact per-zone coverage was not recorded. Active speaker configuration, PEQ, writing other speaker channels and Pattern 2 remain unimplemented. The C# legacy XML PUT implementation also requires hardware verification. Historical RX-A3060 observations are documented separately from software implementation.
 
 ## Solution and projects
 
@@ -48,7 +48,7 @@ The console sample asks for the receiver IP address or hostname and optional HTT
 
 Enter the receiver IP address or hostname when prompted. Press **Enter** to accept the default HTTP port `80`. The sample performs read-only discovery and displays the receiver information. It then asks whether to read legacy XML speaker settings. If selected, enter a reported pattern number to read levels and distances; press Enter to finish. After that, choose whether to connect to YNCA port `50000`, read `SYS:MODELNAME` and Main Zone status, and optionally request additional `SUBUNIT:FUNCTION` values. No command-line parameters are required. Other YNCA tools must disconnect first because many receivers permit only one TCP client.
 
-The three GETs return device identity (model/firmware/API), system and per-zone functions, native zone/input/sound IDs, scene counts, native numeric ranges, speaker-pattern count and active pattern when the receiver reports them. These reads have been observed on an RX-A3060, firmware 2.86; other receiver models are not assumed compatible.
+The core Extended Control discovery GETs return device identity (model/firmware/API), system and per-zone functions, native zone/input/sound IDs, scene counts, native numeric ranges, speaker-pattern count and active pattern when the receiver reports them. These reads have been observed on an RX-A3060, firmware 2.86; other receiver models are not assumed compatible.
 
 The WPF application is a **manual** command and diagnostic interface, not an automated test suite. It refuses writes unless the user opted in before connecting and explicitly confirms the selected target and current setting. Its HTTP output displays operation summaries, **not captured raw network traffic**. The GUI has YNCA connect/disconnect controls, read-only commands, and separately opted-in typed zone write commands with confirmation; unsolicited TCP messages are shown in the YNCA pane. Bilingual language switching and compatibility-report export remain future GUI work. The core library contains no WPF dependency. The `net48` target does not imply supported Linux or Raspberry Pi execution.
 
@@ -100,6 +100,48 @@ native zones. It does **not** claim universal zone support or authorize zone wri
 without Extended Control device-advertised ranges and IDs. Connection state
 `PartiallyConnected` is possible when one enabled protocol works but another fails.
 Availability means a particular endpoint/probe worked, not that all its commands work.
+
+## Phase 5.3: Function-route and legacy descriptor discovery
+
+`InitializeAsync()` now optionally retrieves `/YamahaRemoteControl/desc.xml` and falls
+back to `/YamahaRemoteControl/UnitDesc.xml` **only when Legacy XML is enabled**.
+The descriptor HTTP GET has a 1 MiB size limit, a timeout, no redirects, and
+DTD/external entities disabled. A malformed or absent descriptor does not make
+an otherwise functioning control endpoint unavailable. Descriptor contents
+are **not** converted into executable commands or writable capabilities.
+The public `LegacyDescriptor` snapshot exposes its source path, root name,
+command-element count and any clearly identified native command IDs. A null
+snapshot means missing or unverified metadata, not that Legacy XML is unsupported.
+
+`FunctionRoutes` exposes a read-only list of native IDs associated with system
+and per-zone functions advertised in Extended Control `getFeatures`, plus
+successful YNCA zone `PWR` observations obtained during protocol discovery.
+A route includes a Yamaha-specific logical feature ID, protocol, native
+identifier, evidence source and status. These routes are **descriptive**; they
+do not expose callable endpoints, authorize writes, or promise that an application
+controller already implements the corresponding operation. The capability
+snapshot also retains each advertised zone `range_step` and extra `*_list` under
+`zone.<id>.range.<name>` and `zone.<id>.options.<name>`.
+
+```csharp
+await receiver.InitializeAsync();
+foreach (var route in receiver.FunctionRoutes)
+    Console.WriteLine(route.FunctionId + " | " + route.Protocol +
+        " | " + route.NativeIdentifier + " | " + route.Status);
+var descriptor = receiver.LegacyDescriptor;
+if (descriptor != null)
+    Console.WriteLine(descriptor.ResourcePath + ": " + descriptor.CommandElementCount);
+```
+
+The interactive sample offers an optional route dump after connecting.
+The WPF tester offers **Overview → Function routes and legacy description**.
+Neither operation sends device-setting writes. Future AvrDispatcher adapters
+can consume these Yamaha snapshots without adding any Yamaha dependency on
+AvrDispatcher, DenonMarantzAvrNet or a fourth shared library.
+
+Model profiles should be introduced only for verified, otherwise undiscoverable
+model/firmware differences; no generic device permissions are inferred from a
+model number. Validation on models other than the RX-A3060 remains outstanding.
 
 ## Read-only speaker settings example
 

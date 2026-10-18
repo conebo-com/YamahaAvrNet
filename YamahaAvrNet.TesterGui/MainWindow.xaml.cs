@@ -34,6 +34,7 @@ namespace YamahaAvrNet.TesterGui
                 new TesterCommand("Overview", "Refresh function status", "refresh"),
                 new TesterCommand("Overview", "Available zones and sources", "zones"),
                 new TesterCommand("Overview", "Capabilities and evidence", "capabilities"),
+                new TesterCommand("Overview", "Function routes and legacy description", "function-routes"),
                 new TesterCommand("Speaker Setup", "Read active speaker pattern", "active"),
                 new TesterCommand("Speaker Setup", "Read all advertised patterns", "patterns"),
                 new TesterCommand("Speaker Setup", "Read speaker levels", "levels", true),
@@ -400,6 +401,9 @@ namespace YamahaAvrNet.TesterGui
                     case "capabilities":
                         AppendResult(BuildCapabilities());
                         break;
+                    case "function-routes":
+                        AppendResult(BuildFunctionRoutes());
+                        break;
                     case "active":
                         AppendHttp("POST /YamahaRemoteControl/ctrl (GET Pattern_Sel)");
                         int? active = await _receiver.Speakers.GetActivePatternAsync();
@@ -688,6 +692,32 @@ namespace YamahaAvrNet.TesterGui
                 sb.AppendLine(cap.FeatureId + " | " + cap.Status + " | read " +
                     Permission(cap.CanRead) + " | write " + Permission(cap.CanWrite) +
                     " | " + cap.Evidence);
+            return sb.ToString();
+        }
+
+        private string BuildFunctionRoutes()
+        {
+            var sb = new StringBuilder();
+            var description = _receiver.LegacyDescriptor;
+            if (description == null)
+                sb.AppendLine("Legacy description: unavailable / not verified");
+            else
+            {
+                sb.AppendLine("Legacy description: " + description.ResourcePath +
+                    " | root: " + description.RootElement +
+                    " | command elements: " + description.CommandElementCount);
+                sb.AppendLine("Descriptor entries are incomplete and do not authorize GET or PUT.");
+                if (description.CommandIdentifiers.Count > 0)
+                    sb.AppendLine("Native command identifiers: " +
+                        string.Join(", ", description.CommandIdentifiers));
+            }
+            sb.AppendLine();
+            sb.AppendLine("Function routes (advertised / observed metadata only):");
+            foreach (var route in _receiver.FunctionRoutes.OrderBy(x => x.FunctionId)
+                .ThenBy(x => x.Protocol))
+                sb.AppendLine(route.FunctionId + " | " + route.Protocol + " | " +
+                    route.NativeIdentifier + " | " + route.Status + " | " + route.ReportedBy);
+            sb.AppendLine("A route does not grant write permission or guarantee a typed operation.");
             return sb.ToString();
         }
 
