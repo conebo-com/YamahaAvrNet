@@ -26,12 +26,18 @@
                         Margin="10,0,0,0" Click="BtnOpenWebPage_Click" Focusable="False"/>
                 <TextBlock x:Name="LblLanguage" Text="Language:" VerticalAlignment="Center"
                            Margin="12,0,6,0"/>
+
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <ToggleButton x:Name="TglEnglish" Content="EN" Width="37" Padding="4,2"
-                                  ToolTip="English" IsChecked="True" Click="TglEnglish_Click"/>
-                    <ToggleButton x:Name="TglGerman" Content="DE" Width="37" Padding="4,2"
-                                  Margin="3,0,0,0" ToolTip="Deutsch" Click="TglGerman_Click"/>
+                    <ToggleButton x:Name="TglEnglish" Padding="4,2" Margin="0,0,4,0" Focusable="False"
+                                  ToolTip="English" Click="TglEnglish_Click">
+                        <Image x:Name="ImgFlagEnglish" Source="Images/flag_us.png" Width="30" Height="16"/>
+                    </ToggleButton>
+                    <ToggleButton x:Name="TglGerman" Padding="4,2" Focusable="False"
+                                  ToolTip="Deutsch" Click="TglGerman_Click">
+                        <Image x:Name="ImgFlagGerman" Source="Images/flag_d.png" Width="30" Height="16"/>
+                    </ToggleButton>
                 </StackPanel>
+                
             </WrapPanel>
             <WrapPanel Margin="0,6,0,0" VerticalAlignment="Center">
                 <TextBlock x:Name="LblYncaPort" Text="YNCA TCP port:" VerticalAlignment="Center" Margin="0,0,6,0"/>
@@ -42,6 +48,8 @@
                         Click="BtnYncaDisconnect_Click" IsEnabled="False" Focusable="False"/>
                 <TextBlock x:Name="TxtConnectionStatus" Text="Not connected" FontWeight="Bold"
                            Margin="14,0,0,0" VerticalAlignment="Center"/>
+                <TextBlock x:Name="TxtCompatibilityMode" VerticalAlignment="Center" Margin="12,0,0,0"
+                           FontWeight="Bold" Foreground="DarkOrange" Visibility="Collapsed"/>
             </WrapPanel>
         </StackPanel>
         <Grid Grid.Row="1">
@@ -155,22 +163,28 @@
                              TextWrapping="Wrap" AcceptsReturn="True" VerticalScrollBarVisibility="Auto"
                              Margin="0,2,0,4" Text="YNCA not connected. Open the shared TCP session to receive status updates."/>
                 </Grid>
+
                 <StackPanel Grid.Row="5" Margin="0,5,0,0">
                     <Border Background="#E8F1FB" BorderBrush="#2F6DB5" BorderThickness="1"
-                            CornerRadius="4" Padding="9,7" Margin="0,0,0,7">
-                        <TextBlock x:Name="TxtReportHint" TextWrapping="Wrap" Foreground="#1F4E8C"
-                                   Text="Compatibility report: review a local, read-only discovery snapshot. Nothing is uploaded automatically."/>
+                            CornerRadius="4" Padding="12,10" Margin="0,4,0,10">
+
+                        <TextBlock x:Name="TxtReportHint" TextWrapping="Wrap" FontSize="15"
+                                   FontWeight="Bold" Foreground="#1F4E8C"
+                                   Text="Help the project: check whether your receiver is compatible with the functions offered here. Only read-only operations are run against your receiver, and you can send the result to the project by e-mail. Nothing is sent automatically and nothing is changed on the receiver."/>
                     </Border>
                     <CheckBox x:Name="ChkClearBeforeOperation" Margin="0,0,0,5"
                               Content="Clear outputs before each operation"/>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button x:Name="BtnCompatibility" Content="Compatibility report..."
-                                Padding="12,4" FontWeight="Bold" Click="BtnCompatibility_Click"
+
+                        <Button x:Name="BtnCompatibility" Content="Check receiver compatibility..."
+                                Padding="16,6" FontSize="14" FontWeight="Bold" Click="BtnCompatibility_Click"
                                 IsEnabled="False"/>
+                        
                         <Button x:Name="BtnClear" Content="Clear outputs" Width="116"
                                 Margin="7,0,0,0" Click="BtnClear_Click"/>
                     </StackPanel>
                 </StackPanel>
+
             </Grid>
         </Grid>
     </Grid>
