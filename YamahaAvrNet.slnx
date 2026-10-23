@@ -1,5 +1,15 @@
 <Solution>
-  <Project Path="YamahaAvrNet.csproj" />
-  <Project Path="YamahaAvrNet.Sample/YamahaAvrNet.Sample.csproj" />
-  <Project Path="YamahaAvrNet.TesterGui/YamahaAvrNet.TesterGui.csproj" Id="ab177819-18c4-4c5a-9fc6-9aaf06423805" />
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="YamahaAvrNet.csproj">
+    <Platform Solution="*|x86" Project="x86" />
+  </Project>
+  <Project Path="YamahaAvrNet.Sample/YamahaAvrNet.Sample.csproj">
+    <Platform Solution="*|x86" Project="x86" />
+  </Project>
+  <Project Path="YamahaAvrNet.TesterGui/YamahaAvrNet.TesterGui.csproj" Id="ab177819-18c4-4c5a-9fc6-9aaf06423805">
+    <Platform Solution="*|x86" Project="x86" />
+  </Project>
 </Solution>

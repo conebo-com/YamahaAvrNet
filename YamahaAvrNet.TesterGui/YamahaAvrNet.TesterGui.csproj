@@ -14,6 +14,7 @@
         <Product>YamahaAvrNet</Product>
         <Description>Independent YamahaAvrNet WPF test application</Description>
         <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+        <Platforms>AnyCPU;x86</Platforms>
     </PropertyGroup>
 
     <ItemGroup>
